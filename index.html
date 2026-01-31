@@ -1,0 +1,2946 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0a0a0a">
+    <title>AstroHelper - Assistant ASIAIR Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --astro-red: #ff3b30;
+            --astro-dark: #0a0a0a;
+            --astro-card: #1a1a1a;
+        }
+        body {
+            background-color: var(--astro-dark);
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .night-mode {
+            filter: brightness(0.7) sepia(1) hue-rotate(-30deg) saturate(3);
+        }
+        .card {
+            background-color: var(--astro-card);
+            border: 1px solid #333;
+            border-radius: 12px;
+        }
+        input, select {
+            background-color: #2d2d2d !important;
+            border: 1px solid #444 !important;
+            color: white !important;
+        }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .moon-phase {
+            font-size: 2.0rem;
+            line-height: 1;
+            text-shadow: 0 0 10px rgba(255,255,200,0.35);
+        }
+        .bortle-scale {
+            height: 6px;
+            border-radius: 999px;
+            background: linear-gradient(to right, #000033, #001a4d, #003366, #1a5c1a, #4d7a1a, #7a7a00, #b35900, #cc3300, #990000);
+        }
+        .bortle-marker {
+            width: 10px;
+            height: 10px;
+            background: white;
+            border-radius: 50%;
+            border: 2px solid #333;
+            transform: translateX(-50%);
+            box-shadow: 0 0 6px rgba(255,255,255,0.7);
+        }
+        details summary::-webkit-details-marker { display: none; }
+        details summary { list-style: none; }
+
+        /* Mini-guiding animations (Diagnostic Graphique) */
+        .mini-guide {
+            background: rgba(17, 24, 39, 0.35);
+            border: 1px solid #374151;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .mini-guide svg { display: block; width: 100%; height: 52px; }
+        .mini-base { stroke: rgba(255,255,255,0.55); stroke-width: 1; stroke-dasharray: 3 3; }
+        .mini-axis { stroke: rgba(255,255,255,0.18); stroke-width: 1; }
+        .mini-ra { stroke: #ff4444; }
+        .mini-dec { stroke: #4488ff; }
+        .mini-path { fill: none; stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; }
+
+        /* Draw-on animation (slower for readability) */
+        .mini-animate-draw { stroke-dasharray: 240; stroke-dashoffset: 240; animation: miniDraw 2.8s linear infinite; }
+        @keyframes miniDraw { to { stroke-dashoffset: 0; } }
+
+        /* Gentle scroll (slower “moving” feel like ASIAIR) */
+        .mini-animate-scroll { animation: miniScroll 2.8s linear infinite; }
+        @keyframes miniScroll { from { transform: translateX(0); } to { transform: translateX(-12px); } }
+
+        /* Pulse for spikes (slower) */
+        .mini-animate-pulse { animation: miniPulse 2.0s ease-in-out infinite; }
+        @keyframes miniPulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+        @media (prefers-reduced-motion: reduce) {
+            .mini-animate-draw, .mini-animate-scroll, .mini-animate-pulse { animation: none !important; }
+        }
+    </style>
+</head>
+<body class="pb-20">
+
+    <!-- Tailwind safelist for JS-generated classes -->
+    <div class="hidden border-green-500 border-yellow-500 border-red-500 text-green-500 text-yellow-500 text-red-500 text-green-300 text-yellow-300 text-red-300 bg-green-900/30 border-green-800"></div>
+
+    <!-- Header -->
+    <header class="p-4 border-b border-gray-800 flex justify-between items-center sticky top-0 bg-[#0a0a0a] z-50">
+        <div class="flex items-center gap-3 min-w-0">
+            <h1 class="text-lg font-bold text-red-500 whitespace-nowrap"><i class="fas fa-satellite-dish mr-2"></i>AstroHelper</h1>
+        </div>
+        <div class="flex items-center gap-3">
+            <span id="gpsStatus" class="text-[11px] text-gray-500 max-w-[46vw] truncate"><i class="fas fa-location-crosshairs mr-1"></i>GPS...</span>
+            <button id="refreshGps" class="p-2 rounded-full bg-gray-800 text-gray-200" aria-label="Rafraîchir GPS" title="Rafraîchir GPS">
+                <i class="fas fa-rotate-right"></i>
+            </button>
+            <button id="toggleNight" class="p-2 rounded-full bg-gray-800 text-yellow-400" aria-label="Mode nuit">
+                <i class="fas fa-moon"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="p-4 max-w-4xl mx-auto">
+
+        <!-- 1) Nuit Astronomique + Lune + Qualité du ciel -->
+        <section id="astro-night-section" class="mb-5">
+            <h2 class="text-base font-semibold mb-3 flex items-center">
+                <i class="fas fa-star-and-crescent mr-2 text-indigo-400"></i> Nuit & Ciel
+            </h2>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <!-- Carte Nuit astro -->
+                <div class="card p-3 text-center">
+                    <div class="text-[10px] text-gray-400 uppercase mb-1">Nuit astronomique</div>
+                    <div class="flex flex-col items-center gap-0.5 text-[11px] text-gray-300">
+                        <div>
+                            <span class="text-gray-500 mr-1">Début</span>
+                            <span id="astroStart" class="font-semibold text-indigo-400">--h--</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 mr-1">Fin</span>
+                            <span id="astroEnd" class="font-semibold text-indigo-400">--h--</span>
+                        </div>
+                        <div class="mt-1 text-[10px] text-gray-400">
+                            Durée : <span id="astroDuration" class="text-green-400 font-bold">--h--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Carte Lune -->
+                <div class="card p-3">
+                    <div class="text-[10px] text-gray-400 uppercase mb-1 text-center">Lune</div>
+                    <div class="flex items-center justify-center gap-2">
+                        <div id="moonPhaseIcon" class="moon-phase">🌑</div>
+                        <div class="text-left min-w-0">
+                            <div id="moonIllum" class="text-[11px] text-yellow-400 font-semibold">0% illuminée</div>
+                            <div class="mt-1 text-[10px] text-gray-400 leading-tight space-y-0.5">
+                                <div class="flex items-center gap-1">
+                                    <i class="fas fa-arrow-up text-yellow-400"></i>
+                                    <span class="text-gray-500">Lever</span>
+                                    <span id="moonRise" class="text-gray-200 font-semibold">--h--</span>
+                                </div>
+                                <div class="flex items-center gap-1">
+                                    <i class="fas fa-arrow-down text-yellow-400"></i>
+                                    <span class="text-gray-500">Coucher</span>
+                                    <span id="moonSet" class="text-gray-200 font-semibold">--h--</span>
+                                </div>
+                                <div class="flex items-center gap-1 flex-wrap">
+                                    <i class="fas fa-compass text-yellow-400"></i>
+                                    <span id="moonAlt" class="text-gray-200 font-semibold">--°</span>
+                                    <span class="text-gray-500">Alt</span>
+                                    <span class="text-gray-600">|</span>
+                                    <span id="moonAz" class="text-gray-200 font-semibold">--°</span>
+                                    <span id="moonDir" class="text-indigo-300 font-bold ml-1">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Carte Qualité du ciel / Bortle -->
+                <div class="card p-3">
+                    <div class="flex items-center justify-between">
+                        <div class="text-[10px] text-gray-400 uppercase">Qualité du ciel</div>
+                        <div id="bortleSource" class="text-[10px] text-gray-500"></div>
+                    </div>
+                    <div class="flex items-center justify-center gap-3 mt-1">
+                        <div class="text-center">
+                            <div id="bortleValue" class="text-2xl font-extrabold text-purple-400 leading-none">--</div>
+                            <div class="text-[10px] text-gray-500 mt-1">Bortle</div>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="bortle-scale w-full mb-1"></div>
+                            <div class="relative h-3 mb-1">
+                                <div id="bortleMarker" class="bortle-marker absolute top-0" style="left: 50%;"></div>
+                            </div>
+                            <div id="bortleAdvice" class="text-[10px] text-gray-300 leading-tight line-clamp-3">Chargement...</div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- 2) Météo & Seeing (Tableau Horaire) -->
+        <section id="weather-section" class="mb-5">
+            <div class="flex items-center justify-between gap-3 mb-3">
+                <h2 class="text-base font-semibold flex items-center">
+                    <i class="fas fa-cloud-moon mr-2 text-blue-400"></i> Conditions Heure par Heure
+                </h2>
+                <div id="weatherMeta" class="text-[10px] text-gray-500 text-right leading-tight"></div>
+            </div>
+
+            <div class="card p-3 overflow-hidden">
+                <div id="weatherLoader" class="text-center py-6 text-gray-400">
+                    <i class="fas fa-spinner fa-spin text-2xl mb-3 block"></i>
+                    Analyse de la nuit...
+                </div>
+
+                <div id="weatherTable" class="flex space-x-2 overflow-x-auto scrollbar-hide pb-2"></div>
+
+                <div id="optimalWindow" class="mt-3 p-2 bg-green-900/30 text-green-300 text-xs rounded border border-green-800 hidden">
+                    <i class="fas fa-star mr-2"></i><span id="optText"></span>
+                </div>
+
+                <div class="mt-3 flex flex-wrap justify-center gap-3 text-[11px] text-gray-400">
+                    <div class="flex items-center"><span class="w-2.5 h-2.5 rounded-full bg-green-500 mr-2"></span>TOP</div>
+                    <div class="flex items-center"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 mr-2"></span>VOILE</div>
+                    <div class="flex items-center"><span class="w-2.5 h-2.5 rounded-full bg-red-500 mr-2"></span>STOP</div>
+                    <div class="flex items-center ml-2 border-l border-gray-700 pl-3">
+                        <i class="fas fa-eye text-cyan-400 mr-1"></i>
+                        <span class="text-[10px]">Seeing estimé (")</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 3) Liste de Matériel -->
+        <section id="equipment-section" class="mb-5">
+            <div class="flex items-center justify-between gap-3 mb-3">
+                <h2 class="text-base font-semibold flex items-center">
+                    <i class="fas fa-list mr-2 text-green-400"></i> Liste de Matériel
+                </h2>
+                <div class="flex items-center gap-2">
+                    <button id="applyStockPreset" type="button" class="px-3 py-2 rounded-lg bg-green-700/30 border border-green-800 text-green-200 text-[11px] font-semibold active:bg-green-700/50">
+                        <i class="fas fa-wand-magic-sparkles mr-2"></i>Mon matériel
+                    </button>
+                    <button id="resetConfigBtn" type="button" class="px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 text-[11px] font-semibold active:bg-gray-700">
+                        <i class="fas fa-rotate-left mr-2"></i>Reset
+                    </button>
+                </div>
+            </div>
+            <div class="card p-4 space-y-4">
+                <!-- Bloc 1 : Setup Astro sur monture -->
+                <div>
+                    <div class="text-[11px] text-gray-400 uppercase mb-2 flex items-center gap-2">
+                        <i class="fas fa-satellite text-green-400"></i>
+                        <span>Setup Astro sur monture</span>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        <!-- Monture -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">Monture</label>
+                            <select id="mountType" class="w-full p-2.5 rounded-lg">
+                                <option value="">Sélectionnez une monture</option>
+                                <option value="zwo-am3">ZWO AM3 (Harmonique)</option>
+                                <option value="zwo-am5">ZWO AM5 (Harmonique)</option>
+                                <option value="ioptron-ieq30pro">iOptron iEQ30 Pro</option>
+                                <option value="skywatcher-eq6r-pro">SkyWatcher EQ6-R Pro</option>
+                                <option value="skywatcher-heq5-pro">SkyWatcher HEQ5 Pro</option>
+                                <option value="skywatcher-eq8">SkyWatcher EQ8-R Pro</option>
+                                <option value="ioptron-cem40">iOptron CEM40</option>
+                                <option value="ioptron-cem70">iOptron CEM70</option>
+                                <option value="ioptron-gem45">iOptron GEM45</option>
+                                <option value="losmandy-g11">Losmandy G-11</option>
+                                <option value="losmandy-gm8">Losmandy GM8</option>
+                                <option value="10micron-gm1000">10Micron GM1000 HPS</option>
+                                <option value="10micron-gm2000">10Micron GM2000 HPS</option>
+                                <option value="astrophysics-1200gto">Astro-Physics 1200GTO</option>
+                                <option value="planewave-l-500">PlaneWave L-500</option>
+                                <option value="skywatcher-az-eq5">SkyWatcher AZ-EQ5</option>
+                                <option value="skywatcher-az-gti">SkyWatcher AZ-GTi</option>
+                                <option value="skywatcher-star-adventurer-gti">SkyWatcher Star Adventurer GTi</option>
+                                <option value="skywatcher-star-adventurer-pro">SkyWatcher Star Adventurer Pro</option>
+                                <option value="ioptron-skyguider-pro">iOptron SkyGuider Pro</option>
+                                <option value="fornax-lighttrack-ii">Fornax LightTrack II</option>
+                                <option value="skywatcher-eq3-pro">SkyWatcher EQ3 Pro</option>
+                                <option value="skywatcher-eq5-pro">SkyWatcher EQ5 Pro</option>
+                                <option value="ioptron-cem26">iOptron CEM26</option>
+                                <option value="ioptron-cem60">iOptron CEM60</option>
+                                <option value="vixen-gp2">Vixen GP2</option>
+                                <option value="vixen-sphinx">Vixen Sphinx</option>
+                                <option value="takahashi-em200">Takahashi EM200</option>
+                                <option value="takahashi-em400">Takahashi EM400</option>
+                                <option value="astrophysics-900gto">Astro-Physics 900GTO</option>
+                                <option value="astrophysics-1100gto">Astro-Physics 1100GTO</option>
+                                <option value="planewave-l-350">PlaneWave L-350</option>
+                            </select>
+                            <div class="text-[9px] text-gray-500 mt-1">Astuce : choisis l’alimentation plus bas (près de la batterie) pour l’autonomie.</div>
+                        </div>
+
+                        <!-- Télescope/Lunette -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">Télescope/Lunette</label>
+                            <select id="telescope" class="w-full p-2.5 rounded-lg">
+                                <option value="">Sélectionnez un instrument</option>
+                                
+                                <optgroup label="SkyWatcher">
+                                    <option value="400">Evolux 62ED (400mm f/6.45)</option>
+                                    <option value="420">Evostar 72ED (420mm f/5.8)</option>
+                                    <option value="500">Evostar 80ED (500mm f/6.25)</option>
+                                    <option value="600">Evostar 100ED (600mm f/6)</option>
+                                    <option value="714">Evostar 120ED (714mm f/6)</option>
+                                    <option value="900">Evostar 150ED (900mm f/6)</option>
+                                    <option value="400">Esprit 80ED (400mm f/5)</option>
+                                    <option value="550">Esprit 100ED (550mm f/5.5)</option>
+                                    <option value="700">Esprit 120ED (700mm f/5.8)</option>
+                                    <option value="840">Esprit 150ED (840mm f/5.6)</option>
+                                    <option value="800">Quattro 200P (800mm f/4)</option>
+                                    <option value="1000">Quattro 250P (1000mm f/4)</option>
+                                    <option value="1200">Quattro 300P (1200mm f/4)</option>
+                                    <option value="1000">Newton 200/1000 (1000mm f/5)</option>
+                                    <option value="900">Newton 150/900 (900mm f/6)</option>
+                                </optgroup>
+
+                                <optgroup label="Askar">
+                                    <option value="400">FRA400 (400mm f/5.6)</option>
+                                    <option value="300">FRA300 (300mm f/5)</option>
+                                    <option value="600">FRA600 (600mm f/5.6)</option>
+                                    <option value="446">SQA85 (446mm f/5.3)</option>
+                                    <option value="360">65PHQ (360mm f/5.5)</option>
+                                    <option value="275">55PHQ (275mm f/5)</option>
+                                    <option value="560">107PHQ (560mm f/5.2)</option>
+                                    <option value="540">ACL200 (540mm f/2.7)</option>
+                                </optgroup>
+
+                                <optgroup label="William Optics">
+                                    <option value="250">RedCat 51 (250mm f/4.9)</option>
+                                    <option value="350">RedCat 71 (350mm f/4.9)</option>
+                                    <option value="430">ZenithStar 73 (430mm f/5.9)</option>
+                                    <option value="478">GT81 (478mm f/5.9)</option>
+                                    <option value="541">FLT98 (541mm f/5.5)</option>
+                                    <option value="620">FLT110 (620mm f/5.6)</option>
+                                    <option value="700">FLT132 (700mm f/5.3)</option>
+                                    <option value="560">Fluorostar 120 (560mm f/4.7)</option>
+                                </optgroup>
+
+                                <optgroup label="Takahashi">
+                                    <option value="450">FSQ-85 (450mm f/5.3)</option>
+                                    <option value="530">FSQ-106 (530mm f/5)</option>
+                                    <option value="770">TOA-130 (770mm f/5.9)</option>
+                                    <option value="1000">TOA-150 (1000mm f/6.7)</option>
+                                    <option value="580">TSA-120 (580mm f/4.8)</option>
+                                    <option value="500">FC-100DF (500mm f/5)</option>
+                                    <option value="640">Epsilon 130D (640mm f/4.9)</option>
+                                    <option value="420">FS-60CB (420mm f/7)</option>
+                                </optgroup>
+
+                                <optgroup label="Celestron">
+                                    <option value="2032">C8 EdgeHD (2032mm f/10)</option>
+                                    <option value="2350">C9.25 EdgeHD (2350mm f/10)</option>
+                                    <option value="2800">C11 EdgeHD (2800mm f/10)</option>
+                                    <option value="3556">C14 EdgeHD (3556mm f/10)</option>
+                                    <option value="400">RASA 8" (400mm f/2)</option>
+                                    <option value="620">RASA 11" (620mm f/2.2)</option>
+                                </optgroup>
+
+                                <optgroup label="Sharpstar">
+                                    <option value="400">61EDPH II (400mm f/6.5)</option>
+                                    <option value="348">76EDPH (348mm f/4.6)</option>
+                                    <option value="400">80EDPH (400mm f/5)</option>
+                                    <option value="550">94EDPH (550mm f/5.8)</option>
+                                    <option value="550">107APO (550mm f/5.1)</option>
+                                </optgroup>
+
+                                <optgroup label="TS-Optics / Photoline">
+                                    <option value="360">Photoline 60/360 (360mm f/6)</option>
+                                    <option value="420">Photoline 72/420 (420mm f/5.8)</option>
+                                    <option value="480">Photoline 80/480 (480mm f/6)</option>
+                                    <option value="560">Photoline 102/560 (560mm f/5.5)</option>
+                                    <option value="700">Photoline 125/700 (700mm f/5.6)</option>
+                                </optgroup>
+
+                                <optgroup label="Explore Scientific">
+                                    <option value="714">ED80 (714mm f/8.9)</option>
+                                    <option value="714">ED102 (714mm f/7)</option>
+                                    <option value="950">127/950 ED (950mm f/7.5)</option>
+                                    <option value="1200">152/1200 ED (1200mm f/7.9)</option>
+                                </optgroup>
+                                
+                                <optgroup label="Autres">
+                                    <option value="2000">Meade LX200 8" (2000mm f/10)</option>
+                                    <option value="1370">RC 8" f/8 (1370mm)</option>
+                                    <option value="800">Newton 200/800 (800mm f/4)</option>
+                                    <option value="540">AP Stowaway 92mm (540mm f/5.9)</option>
+                                </optgroup>
+                            </select>
+                        </div>
+
+                        <!-- Réducteur / Barlow -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">Réducteur / Barlow</label>
+                            <select id="reducerBarlow" class="w-full p-2.5 rounded-lg">
+                                <option value="1.0">Aucun (1x)</option>
+                                <!-- Réducteurs SkyWatcher Evolux/Evostar -->
+                                <option value="0.9">SkyWatcher 0.9x Reducer (Evolux/Evostar ED)</option>
+                                <option value="0.85">SkyWatcher 0.85x Reducer/Flattener</option>
+                                <option value="0.8">SkyWatcher 0.8x Reducer M48</option>
+                                <!-- Réducteurs génériques ED/APO -->
+                                <option value="0.79">TS-Optics 0.79x Reducer M48</option>
+                                <option value="0.8">Réducteur 0.8x générique M48</option>
+                                <option value="0.76">Starizona Apex ED 0.76x</option>
+                                <option value="0.72">Starizona Apex ED 0.72x</option>
+                                <!-- Réducteurs SCT -->
+                                <option value="0.63">Celestron 0.63x f/6.3 (SCT)</option>
+                                <option value="0.7">Celestron 0.7x Reducer (SCT)</option>
+                                <option value="0.67">Meade 0.67x f/6.7 (SCT)</option>
+                                <option value="0.5">Starizona HyperStar 0.5x</option>
+                                <!-- Réducteurs RC -->
+                                <option value="0.75">Réducteur RC 0.75x</option>
+                                <option value="0.67">Réducteur RC 0.67x</option>
+                                <!-- Réducteurs Takahashi -->
+                                <option value="0.73">Takahashi 0.73x Reducer</option>
+                                <option value="0.77">Takahashi 0.77x Reducer QE</option>
+                                <option value="0.85">Takahashi 0.85x Reducer</option>
+                                <!-- Réducteurs William Optics -->
+                                <option value="0.8">William Optics 0.8x Reducer FLAT6A III</option>
+                                <option value="0.72">William Optics 0.72x Reducer FLAT61</option>
+                                <!-- Réducteurs Askar -->
+                                <option value="0.7">Askar 0.7x Reducer</option>
+                                <option value="0.76">Askar 0.76x Reducer FRA400/FRA600</option>
+                                <!-- Flatteners (sans réduction) -->
+                                <option value="1.0">Flattener 1.0x (aplanisseur seul)</option>
+                                <!-- Extenders -->
+                                <option value="1.25">Extender 1.25x</option>
+                                <option value="1.5">Extender 1.5x</option>
+                                <!-- Barlow -->
+                                <option value="1.5">Barlow 1.5x</option>
+                                <option value="2.0">Barlow 2x (TeleVue, Meade, etc.)</option>
+                                <option value="2.25">TeleVue Powermate 2.25x</option>
+                                <option value="2.5">Barlow 2.5x</option>
+                                <option value="3.0">Barlow 3x</option>
+                                <option value="4.0">TeleVue Powermate 4x</option>
+                                <option value="5.0">TeleVue Powermate 5x</option>
+                            </select>
+                        </div>
+
+                        <!-- Focale effective (calculée) -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">Focale effective (mm)</label>
+                            <input type="number" id="mainFocalLength" value="400" min="50" max="5000" readonly class="w-full p-2.5 rounded-lg opacity-90">
+                            <div class="text-[9px] text-gray-500 mt-1">
+                                Base: <span id="baseFocalDisplay">400</span>mm • Facteur: <span id="factorDisplay">1.00x</span>
+                            </div>
+                        </div>
+
+                        <!-- Caméra Astronomique (Refroidie/Planétaire) -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">Caméra Astro (Cooled/Planetary)</label>
+                            <select id="mainCamera" class="w-full p-2.5 rounded-lg">
+                                <option value="">Sélectionnez une caméra astro</option>
+
+                                <optgroup label="ZWO ASI">
+                                    <option value="zwo-asi2600mm-pro">ASI2600MM Pro</option>
+                                    <option value="zwo-asi6200mm-pro">ASI6200MM Pro</option>
+                                    <option value="zwo-asi533mc-pro">ASI533MC Pro</option>
+                                    <option value="zwo-asi678mc">ASI678MC</option>
+                                    <option value="zwo-asi294mc-pro">ASI294MC Pro</option>
+                                    <option value="zwo-asi183mc-pro">ASI183MC Pro (couleur)</option>
+                                    <option value="zwo-asi183mm-pro">ASI183MM Pro</option>
+                                    <option value="zwo-asi1600mm-pro">ASI1600MM Pro</option>
+                                    <option value="zwo-asi071mc-pro">ASI071MC Pro</option>
+                                    <option value="zwo-asi224mc">ASI224MC</option>
+                                    <option value="zwo-asi462mc">ASI462MC</option>
+                                </optgroup>
+
+                                <optgroup label="QHY">
+                                    <option value="qhy268c">QHY268C</option>
+                                    <option value="qhy600ph-all-sky">QHY600PH</option>
+                                    <option value="qhy247c">QHY247C</option>
+                                    <option value="qhy183m">QHY183M</option>
+                                    <option value="qhy163m">QHY163M</option>
+                                    <option value="qhy128c">QHY128C</option>
+                                </optgroup>
+
+                                <optgroup label="Atik">
+                                    <option value="atik-horizon">Horizon</option>
+                                    <option value="atik-383l">383L+</option>
+                                    <option value="atik-460ex">460EX</option>
+                                    <option value="atik-11000">11000</option>
+                                </optgroup>
+
+                                <optgroup label="SBIG">
+                                    <option value="sbig-stf8300">STF-8300</option>
+                                    <option value="sbig-stx-16803">STX-16803</option>
+                                </optgroup>
+
+                                <optgroup label="Moravian">
+                                    <option value="moravian-c3-6100">C3-6100</option>
+                                    <option value="moravian-g3-11000">G3-11000</option>
+                                </optgroup>
+
+                                <optgroup label="Player One">
+                                    <option value="player-one-mars-m2-pro">Mars-M2 Pro</option>
+                                    <option value="player-one-ares-m">Ares-M</option>
+                                    <option value="player-one-saturn-m">Saturn-M</option>
+                                </optgroup>
+
+                                <optgroup label="FLI">
+                                    <option value="fli-microline-16200">MicroLine 16200</option>
+                                    <option value="fli-proline-16803">ProLine 16803</option>
+                                </optgroup>
+                            </select>
+                        </div>
+
+                        <!-- Lunette de guidage/OAG -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">Lunette de guidage/OAG</label>
+                            <select id="guideScope" class="w-full p-2.5 rounded-lg">
+                                <option value="">Sélectionnez une lunette/OAG</option>
+                                <!-- SVBony -->
+                                <option value="190">SVBony SV106 50/190mm (190mm)</option>
+                                <option value="120">SVBony SV165 30mm f/4 (120mm)</option>
+                                <option value="180">SVBony 40/180mm Guide Scope (180mm)</option>
+                                <option value="240">SVBony SV182 60/240mm (240mm)</option>
+                                <option value="120">SVBony 30/120mm Guide Scope (120mm)</option>
+                                <option value="400">SVBony 60/400mm Guide Scope (400mm)</option>
+                                <!-- ZWO -->
+                                <option value="120">ZWO 30mm f/4 Mini Guide (120mm)</option>
+                                <option value="180">ZWO 60mm f/3 Guide Scope (180mm)</option>
+                                <option value="240">ZWO 60mm f/4 Guide Scope (240mm)</option>
+                                <option value="120">ZWO 120mm Guide Scope (120mm)</option>
+                                <!-- William Optics -->
+                                <option value="130">William Optics 32mm UniGuide (130mm)</option>
+                                <option value="200">William Optics 50mm UniGuide (200mm)</option>
+                                <!-- Celestron -->
+                                <option value="240">Celestron 60mm Guide Scope (240mm)</option>
+                                <option value="320">Celestron 80mm Guide Scope (320mm)</option>
+                                <!-- Orion -->
+                                <option value="162">Orion Mini 50mm Guide (162mm)</option>
+                                <option value="240">Orion 60mm Deluxe Guide (240mm)</option>
+                                <!-- Astro-Tech -->
+                                <option value="180">Astro-Tech 50mm Guide (180mm)</option>
+                                <option value="275">Astro-Tech 60mm Guide (275mm)</option>
+                                <!-- TS-Optics -->
+                                <option value="180">TS-Optics 50/180mm Guide (180mm)</option>
+                                <option value="240">TS-Optics 60/240mm Guide (240mm)</option>
+                                <!-- Altair -->
+                                <option value="150">Altair 50mm MiniGuide (150mm)</option>
+                                <option value="200">Altair 60mm Finder Guide (200mm)</option>
+                                <!-- OAG -->
+                                <option value="oag">ZWO OAG-L (utilise focale principale)</option>
+                                <option value="oag">ZWO OAG-M (utilise focale principale)</option>
+                                <option value="oag">ZWO OAG Mini (utilise focale principale)</option>
+                                <option value="oag">TS-Optics OAG (utilise focale principale)</option>
+                                <option value="oag">Starlight Xpress OAG (utilise focale principale)</option>
+                                <option value="oag">QHY OAG-M (utilise focale principale)</option>
+                                <option value="oag">Orion Thin OAG (utilise focale principale)</option>
+                            </select>
+                        </div>
+
+                        <!-- Focale guidage -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">Focale guidage (mm)</label>
+                            <input type="number" id="guideFocalLength" value="120" min="30" max="400" class="w-full p-2.5 rounded-lg">
+                        </div>
+
+                        <!-- Caméra de guidage -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">Caméra de guidage</label>
+                            <select id="guideCamera" class="w-full p-2.5 rounded-lg">
+                                <option value="">Sélectionnez une caméra guide</option>
+                                <!-- ZWO Mini -->
+                                <option value="3.75">ZWO ASI120MM Mini (3.75µm)</option>
+                                <option value="3.75">ZWO ASI120MC Mini (3.75µm)</option>
+                                <option value="5.86">ZWO ASI174MM Mini (5.86µm)</option>
+                                <option value="2.9">ZWO ASI290MM Mini (2.9µm)</option>
+                                <option value="2.9">ZWO ASI290MC Mini (2.9µm)</option>
+                                <option value="3.75">ZWO ASI220MM Mini (3.75µm)</option>
+                                <option value="2.4">ZWO ASI462MC (2.4µm)</option>
+                                <option value="2.9">ZWO ASI224MC (2.9µm)</option>
+                                <option value="3.75">ZWO ASI385MC (3.75µm)</option>
+                                <!-- QHY -->
+                                <option value="5.86">QHY5III174M (5.86µm)</option>
+                                <option value="2.9">QHY5III290M (2.9µm)</option>
+                                <option value="2.9">QHY5III290C (2.9µm)</option>
+                                <option value="2.4">QHY5III462C (2.4µm)</option>
+                                <option value="3.75">QHY5L-IIM (3.75µm)</option>
+                                <option value="3.75">QHY5L-IIC (3.75µm)</option>
+                                <option value="2.4">QHY5III678M (2.4µm)</option>
+                                <!-- Player One -->
+                                <option value="2.9">Player One Neptune-C II (2.9µm)</option>
+                                <option value="2.9">Player One Neptune-M II (2.9µm)</option>
+                                <option value="3.75">Player One Ceres-C (3.75µm)</option>
+                                <option value="3.75">Player One Ceres-M (3.75µm)</option>
+                                <!-- Atik -->
+                                <option value="7.4">Atik Titan (7.4µm)</option>
+                                <option value="3.75">Atik GP (3.75µm)</option>
+                                <!-- Starlight Xpress -->
+                                <option value="8.2">Starlight Xpress Lodestar X2 (8.2µm)</option>
+                                <option value="8.6">Starlight Xpress Ultrastar (8.6µm)</option>
+                                <!-- Moravian -->
+                                <option value="4.54">Moravian G2-1600 (4.54µm)</option>
+                                <!-- Altair -->
+                                <option value="2.9">Altair GPCAM3 290M (2.9µm)</option>
+                                <option value="3.75">Altair GPCAM2 AR0130 (3.75µm)</option>
+                                <!-- SVBONY -->
+                                <option value="2.9">SVBony SV305 Pro (2.9µm)</option>
+                                <option value="2.4">SVBony SV505C (2.4µm)</option>
+                            </select>
+                        </div>
+
+                        <!-- Bande chauffante lunette principale -->
+                        <div>
+                            <div class="flex items-center justify-between">
+                                <label class="block text-[11px] text-gray-400">Bande chauffante lunette principale</label>
+                                <label class="inline-flex items-center cursor-pointer select-none">
+                                    <input id="mainHeaterToggle" type="checkbox" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-gray-700 rounded-full peer peer-checked:bg-green-600 relative after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
+                                    <span class="ml-2 text-[10px] text-gray-500 peer-checked:text-green-300">ON</span>
+                                </label>
+                            </div>
+                            <div class="text-[9px] text-gray-500 mt-1">≈ 8W quand activée</div>
+                        </div>
+
+                        <!-- Bande chauffante caméra de guidage -->
+                        <div>
+                            <div class="flex items-center justify-between">
+                                <label class="block text-[11px] text-gray-400">Bande chauffante caméra de guidage</label>
+                                <label class="inline-flex items-center cursor-pointer select-none">
+                                    <input id="guideHeaterToggle" type="checkbox" class="sr-only peer">
+                                    <div class="w-11 h-6 bg-gray-700 rounded-full peer peer-checked:bg-green-600 relative after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
+                                    <span class="ml-2 text-[10px] text-gray-500 peer-checked:text-green-300">ON</span>
+                                </label>
+                            </div>
+                            <div class="text-[9px] text-gray-500 mt-1">≈ 8W quand activée</div>
+                        </div>
+
+                        <!-- ASIAIR -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">ASIAIR</label>
+                            <select id="asiair" class="w-full p-2.5 rounded-lg">
+                                <option value="">Sélectionnez un ASIAIR</option>
+                                <option value="plus">ASIAIR Plus</option>
+                                <option value="plus2">ASIAIR Plus 2</option>
+                                <option value="mini">ASIAIR Mini</option>
+                                <option value="mini2">ASIAIR Mini 2</option>
+                                <option value="pro">ASIAIR Pro</option>
+                                <option value="max">ASIAIR Max</option>
+                                <option value="other">Autre (Raspberry Pi, etc.)</option>
+                            </select>
+                        </div>
+
+                        <!-- Roue à filtres -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">Roue à filtres</label>
+                            <select id="filterWheel" class="w-full p-2.5 rounded-lg">
+                                <option value="">Sélectionnez une roue</option>
+                                <option value="zwo-eFW">ZWO EFW (7x2"/5x1.25")</option>
+                                <option value="zwo-mFW">ZWO MFW (36x2")</option>
+                                <option value="zwo-efw-8">ZWO EFW 8 (8x1.25"/2")</option>
+                                <option value="qhy-m">QHY Mini Filter Wheel</option>
+                                <option value="qhy-cfw">QHY CFW (7x2")</option>
+                                <option value="starlight-micro">Starlight Xpress MicroTouch</option>
+                                <option value="starlight-usb">Starlight Xpress USB Filter Wheel</option>
+                                <option value="pegasus-ppb-usb">Pegasus Pocket Powerbox USB</option>
+                                <option value="atik-efw2">Atik EFW2 (5/7 positions)</option>
+                                <option value="atik-efw3">Atik EFW3 (9 positions)</option>
+                                <option value="fli-cfw">FLI CFW (7/12 positions)</option>
+                                <option value="moravian-fw">Moravian Filter Wheel</option>
+                                <option value="astrogear-afw">AstroGear AFW (7x2")</option>
+                            </select>
+                        </div>
+
+                        <!-- Tiroir à filtre -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">Tiroir à filtre</label>
+                            <select id="filterDrawer" class="w-full p-2.5 rounded-lg">
+                                <option value="">Sélectionnez un tiroir</option>
+                                <option value="manual-2in">Manuel 2"</option>
+                                <option value="manual-1.25in">Manuel 1.25"</option>
+                                <option value="motorized">Motorisé (Optolong, etc.)</option>
+                            </select>
+                        </div>
+
+                        <!-- EAF -->
+                        <div>
+                            <label class="block text-[11px] mb-1 text-gray-400">EAF</label>
+                            <select id="eaf" class="w-full p-2.5 rounded-lg">
+                                <option value="">Sélectionnez un EAF</option>
+                                <option value="zwo-eaf">ZWO EAF</option>
+                                <option value="pegasus-focus-cube">Pegasus FocusCube V2</option>
+                                <option value="zwo-efc">ZWO EFC</option>
+                                <option value="moonlite-nlbfocus">Moonlite NLB</option>
+                            </select>
+                        </div>
+
+                        <!-- Batteries nomades + alimentation monture (même ligne) -->
+                        <div class="md:col-span-2 lg:col-span-3">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-[11px] mb-1 text-gray-400"><i class="fas fa-battery-three-quarters mr-1 text-yellow-400"></i>Batterie nomade</label>
+                                    <select id="battery" class="w-full p-2.5 rounded-lg">
+                                        <option value="">Sélectionnez une batterie</option>
+                                        <option value="celestron-powertank-pro">Celestron PowerTank Pro</option>
+                                        <option value="celestron-powertank-lithium">Celestron PowerTank Lithium</option>
+                                        <option value="pegasus-powerbox-advance">Pegasus Powerbox Advance</option>
+                                        <option value="pegasus-pocket-powerbox">Pegasus Pocket Powerbox</option>
+                                        <option value="talon-ultimate-lipo">Talon Ultimate LiPo Pack</option>
+                                        <option value="ped-power-expander">PED Power Expander</option>
+                                        <option value="shoptronics-36000">ShopTronics 36000mAh</option>
+                                        <option value="goalzero-sherpa100ac">Goal Zero Sherpa 100AC</option>
+                                        <option value="anker-powercore-26800">Anker PowerCore 26800</option>
+                                        <option value="bialetti-268">Bialetti 268 Powerbank</option>
+                                        <option value="ecoflow-river-2">EcoFlow River 2</option>
+                                        <option value="jackery-explorer-240">Jackery Explorer 240</option>
+                                        <option value="bluetti-eb3a">Bluetti EB3A</option>
+                                        <option value="goalzero-yeti-150">GoalZero Yeti 150</option>
+                                        <option value="ravpower-26800">RavPower 26800mAh</option>
+                                        <option value="xiaomi-powerbank-3">Xiaomi PowerBank 3</option>
+                                        <option value="anker-powercore-iii">Anker PowerCore III 19000</option>
+                                        <option value="maxoak-eb150">Maxoak EB150</option>
+                                        <option value="renogy-phoenix-200">Renogy Phoenix 200</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label class="block text-[11px] mb-1 text-gray-400"><i class="fas fa-bolt mr-1 text-cyan-400"></i>Suivi sidéral (Guide Rate)</label>
+                                    <select id="guideRate" class="w-full p-2.5 rounded-lg">
+                                        <option value="auto">Auto (recommandé)</option>
+                                        <option value="0.25">0.25x</option>
+                                        <option value="0.5">0.5x</option>
+                                        <option value="0.75">0.75x</option>
+                                        <option value="0.9">0.9x</option>
+                                        <option value="1.0">1.0x</option>
+                                    </select>
+                                    <div class="text-[9px] text-gray-500 mt-1">Valeur utilisée pour calculer le Step Size (12 étapes). À régler aussi dans l’ASIAIR (guide-rate monture).</div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-[11px] mb-1 text-gray-400"><i class="fas fa-plug mr-1 text-cyan-400"></i>Alim. monture</label>
+                                    <select id="mountPowerSource" class="w-full p-2.5 rounded-lg">
+                                        <option value="main">Sur batterie nomade (12V)</option>
+                                        <option value="aa">Sur piles AA / petite batterie dédiée</option>
+                                        <option value="separate">Sur batterie séparée dédiée</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="text-[9px] text-gray-500 mt-1 flex items-start gap-1.5">
+                                <i class="fas fa-circle-info mt-[1px] text-gray-500"></i>
+                                <span>Si ta monture est sur piles ou une batterie dédiée, l’autonomie de la batterie nomade n’est pas impactée.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bloc 2 : Setup APN / Trépied -->
+                <div class="pt-3 border-t border-gray-800">
+                    <div class="text-[11px] text-gray-400 uppercase mb-2 flex items-center gap-2">
+                        <i class="fas fa-camera-retro text-yellow-400"></i>
+                        <span>Setup APN (trépied ou monture)</span>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        <!-- APN -->
+                        <div class="bg-gray-800/50 p-2 rounded border border-gray-700">
+                            <div class="flex justify-between items-center mb-1">
+                                <label class="block text-[11px] text-yellow-400 font-bold"><i class="fas fa-camera mr-1"></i>Appareil Photo (APN)</label>
+                                <span class="text-[9px] text-gray-500">Pour setup léger ou trépied</span>
+                            </div>
+                            <select id="dslrCamera" class="w-full p-2.5 rounded-lg border-yellow-900/30">
+                                <option value="" data-crop="1">Sélectionnez un APN</option>
+
+                                <optgroup label="Nikon">
+                                    <option value="nikon-d5600" data-crop="1.5">Nikon D5600 (APS-C)</option>
+                                    <option value="nikon-d5300" data-crop="1.5">Nikon D5300 (APS-C)</option>
+                                    <option value="nikon-d7500" data-crop="1.5">Nikon D7500 (APS-C)</option>
+                                    <option value="nikon-d850" data-crop="1">Nikon D850 (Full Frame)</option>
+                                    <option value="nikon-z6ii" data-crop="1">Nikon Z6 / Z6 II (Full Frame)</option>
+                                    <option value="nikon-z50" data-crop="1.5">Nikon Z50 (APS-C)</option>
+                                </optgroup>
+
+                                <optgroup label="Canon">
+                                    <option value="canon-eos-ra" data-crop="1">Canon EOS Ra (Full Frame)</option>
+                                    <option value="canon-eos-r5" data-crop="1">Canon EOS R5 (Full Frame)</option>
+                                    <option value="canon-eos-600d" data-crop="1.6">Canon EOS 600D (APS-C)</option>
+                                    <option value="canon-eos-2000d" data-crop="1.6">Canon EOS 2000D (APS-C)</option>
+                                    <option value="canon-eos-6d-mk2" data-crop="1">Canon EOS 6D MkII (Full Frame)</option>
+                                </optgroup>
+
+                                <optgroup label="Sony">
+                                    <option value="sony-a7siii" data-crop="1">Sony A7S III (Full Frame)</option>
+                                    <option value="sony-a6000" data-crop="1.5">Sony A6000 (APS-C)</option>
+                                    <option value="sony-a6600" data-crop="1.5">Sony A6600 (APS-C)</option>
+                                </optgroup>
+                                
+                                <optgroup label="Autres">
+                                    <option value="fuji-xt4" data-crop="1.5">Fujifilm X-T4 (APS-C)</option>
+                                    <option value="pentax-k1" data-crop="1">Pentax K-1 (Full Frame)</option>
+                                    <option value="olympus-omd" data-crop="2">Olympus/Panasonic (MFT 2x)</option>
+                                </optgroup>
+                            </select>
+                        </div>
+
+                        <!-- Objectifs et Téléobjectifs Photo -->
+                        <div class="bg-gray-800/50 p-2 rounded border border-gray-700">
+                            <div class="flex justify-between items-center mb-1">
+                                <label class="block text-[11px] text-yellow-400 font-bold"><i class="fas fa-circle-dot mr-1"></i>Objectif Photo</label>
+                                <span class="text-[9px] text-gray-500">Pour APN sur trépied/monture</span>
+                            </div>
+                            <select id="lensObjective" class="w-full p-2.5 rounded-lg border-yellow-900/30">
+                                <option value="">Sélectionnez un objectif</option>
+
+                                <optgroup label="Tokina">
+                                    <option value="11">Tokina 11-19mm (à 11mm)</option>
+                                    <option value="19">Tokina 11-19mm (à 19mm)</option>
+                                    <option value="11">Tokina 11-16mm f/2.8 (à 11mm)</option>
+                                    <option value="16">Tokina 11-16mm f/2.8 (à 16mm)</option>
+                                    <option value="11">Tokina 11-20mm f/2.8 (à 11mm)</option>
+                                    <option value="20">Tokina 11-20mm f/2.8 (à 20mm)</option>
+                                    <option value="16">Tokina 16-28mm f/2.8 (à 16mm)</option>
+                                    <option value="28">Tokina 16-28mm f/2.8 (à 28mm)</option>
+                                </optgroup>
+
+                                <optgroup label="Sigma">
+                                    <option value="14">Sigma 14mm f/1.8 DG HSM Art</option>
+                                    <option value="20">Sigma 20mm f/1.4 DG HSM Art</option>
+                                    <option value="24">Sigma 24mm f/1.4 DG HSM Art</option>
+                                    <option value="35">Sigma 35mm f/1.4 DG HSM Art</option>
+                                    <option value="50">Sigma 50mm f/1.4 DG HSM Art</option>
+                                    <option value="85">Sigma 85mm f/1.4 DG HSM Art</option>
+                                    <option value="135">Sigma 135mm f/1.8 DG HSM Art</option>
+                                    <option value="14">Sigma 14-24mm f/2.8 DG HSM Art (à 14mm)</option>
+                                    <option value="24">Sigma 14-24mm f/2.8 DG HSM Art (à 24mm)</option>
+                                </optgroup>
+
+                                <optgroup label="Tamron">
+                                    <option value="150">Tamron 150-600mm f/5-6.3 (à 150mm)</option>
+                                    <option value="600">Tamron 150-600mm f/5-6.3 (à 600mm)</option>
+                                </optgroup>
+
+                                <optgroup label="Samyang / Rokinon">
+                                    <option value="14">Samyang/Rokinon 14mm f/2.8</option>
+                                    <option value="135">Samyang/Rokinon 135mm f/2</option>
+                                </optgroup>
+
+                                <optgroup label="Canon">
+                                    <option value="24">Canon EF 24mm f/1.4L II</option>
+                                    <option value="35">Canon EF 35mm f/1.4L II</option>
+                                    <option value="50">Canon EF 50mm f/1.2L</option>
+                                    <option value="85">Canon EF 85mm f/1.2L II</option>
+                                    <option value="200">Canon EF 200mm f/2L IS</option>
+                                    <option value="300">Canon EF 300mm f/2.8L IS II</option>
+                                    <option value="400">Canon EF 400mm f/2.8L IS III</option>
+                                    <option value="500">Canon EF 500mm f/4L IS II</option>
+                                    <option value="24">Canon EF 24-70mm f/2.8L II (à 24mm)</option>
+                                    <option value="70">Canon EF 24-70mm f/2.8L II (à 70mm)</option>
+                                    <option value="70">Canon EF 70-200mm f/2.8L IS III (à 70mm)</option>
+                                    <option value="200">Canon EF 70-200mm f/2.8L IS III (à 200mm)</option>
+                                </optgroup>
+
+                                <optgroup label="Nikon">
+                                    <option value="24">Nikon Z 24mm f/1.8 S</option>
+                                    <option value="50">Nikon AF-S 50mm f/1.4G</option>
+                                    <option value="85">Nikon AF-S 85mm f/1.4G</option>
+                                    <option value="105">Nikon AF-S 105mm f/1.4E</option>
+                                    <option value="200">Nikon AF-S 200mm f/2G ED VR II</option>
+                                    <option value="300">Nikon AF-S 300mm f/2.8G ED VR II</option>
+                                </optgroup>
+
+                                <optgroup label="Laowa">
+                                    <option value="12">Laowa 12mm f/2.8 Zero-D</option>
+                                    <option value="15">Laowa 15mm f/2 Zero-D</option>
+                                </optgroup>
+
+                                <optgroup label="Autres">
+                                    <option value="105">Canon RF 100mm f/2.8L Macro IS</option>
+                                </optgroup>
+                            </select>
+
+                            <!-- Règle des 500 / Trépied -->
+                            <div id="tripodRuleInfo" class="hidden mt-2 pt-2 border-t border-gray-700">
+                                <div class="flex items-center justify-between text-[10px] text-gray-300">
+                                    <span>Pose max (Trépied fixe) :</span>
+                                    <span id="rule500Result" class="text-yellow-400 font-bold text-xs">-- s</span>
+                                </div>
+                                <div class="text-[9px] text-gray-500 mt-0.5">Basé sur règle NPF/500 simplifiée pour éviter le filé.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Poids (sur la monture) + Energie / Autonomie -->
+                <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <!-- Poids: UNIQUEMENT ce qui est sur la monture (pas batteries / pas piles) -->
+                    <div class="bg-black/40 border border-gray-800 rounded-lg p-3 text-[11px] flex items-center gap-2">
+                        <i class="fas fa-weight-hanging text-purple-300"></i>
+                        <div class="min-w-0">
+                            <div class="text-gray-400 uppercase tracking-wide">Poids sur monture</div>
+                            <div class="text-sm font-semibold text-purple-200"><span id="payloadKg">--</span> kg</div>
+                            <div class="text-[9px] text-gray-500 leading-tight">Inclut tube + caméras + guidage + ASIAIR + accessoires. Exclut batteries/piles.</div>
+                        </div>
+                    </div>
+
+                    <div class="bg-black/40 border border-gray-800 rounded-lg p-3 text-[11px] flex items-center gap-2">
+                        <i class="fas fa-battery-half text-green-400"></i>
+                        <div>
+                            <div class="text-gray-400 uppercase tracking-wide flex items-center gap-2">
+                                <span>Consommation estimée</span>
+                                <span id="mountPowerBadge" class="text-[10px] px-1.5 py-0.5 rounded border border-gray-700 bg-gray-900 text-gray-300">Monture: ?</span>
+                            </div>
+                            <div class="text-sm"><span id="powerTotal">--</span> W</div>
+                            <div class="text-[9px] text-gray-500 leading-tight">Autonomie basée sur la batterie nomade (hors piles/batt. séparée monture).</div>
+                        </div>
+                    </div>
+
+                    <div class="bg-black/40 border border-gray-800 rounded-lg p-3 text-[11px] flex items-center gap-2">
+                        <i class="fas fa-charging-station text-yellow-400"></i>
+                        <div>
+                            <div class="text-gray-400 uppercase tracking-wide">Batterie / Autonomie</div>
+                            <div class="text-sm"><span id="batteryCapacity">--</span> Wh • <span id="powerTotalInline">--</span> W</div>
+                            <div id="runtimeEstimate" class="text-sm font-semibold text-green-400">--h--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4) RÉGLAGES GUIDAGE ASIAIR (Expert) -->
+        <section id="asiair-section" class="mb-6">
+            <h2 class="text-base font-semibold mb-3 flex items-center">
+                <i class="fas fa-satellite-dish mr-2 text-red-500"></i> Guidage ASIAIR Pro
+            </h2>
+            <div class="card p-4">
+                <!-- BOUTON CALCULER (visible) -->
+                <div class="mb-4">
+                    <button id="recalcBtn" type="button" class="w-full px-4 py-3 rounded-lg bg-cyan-700 hover:bg-cyan-600 active:bg-cyan-800 text-white text-[12px] font-bold">
+                        <i class="fas fa-calculator mr-2"></i>Calculer les réglages
+                    </button>
+                </div>
+
+                <div class="space-y-3 mb-5">
+                    <!-- 1. AVANT CALIBRATION -->
+                    <div class="p-3 bg-black/30 rounded-lg border border-gray-800">
+                        <div class="text-[11px] font-bold text-gray-300 uppercase mb-2 flex items-center border-b border-gray-700 pb-1">
+                            <i class="fas fa-ruler-combined mr-2 text-yellow-400"></i>1. Avant Calibration (ASIAIR)
+                        </div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div class="bg-gray-900/40 border border-gray-700 rounded p-2 text-center">
+                                <div class="text-[9px] text-gray-500 uppercase">Step Size</div>
+                                <div class="text-xl font-extrabold text-yellow-400"><span id="setCalStep">--</span>ms</div>
+                            </div>
+                            <div class="bg-gray-900/40 border border-gray-700 rounded p-2 text-center">
+                                <div class="text-[9px] text-gray-500 uppercase">Max RA Dur.</div>
+                                <div class="text-xl font-extrabold text-gray-200"><span id="setCalMaxRA">2000</span>ms</div>
+                            </div>
+                            <div class="bg-gray-900/40 border border-gray-700 rounded p-2 text-center">
+                                <div class="text-[9px] text-gray-500 uppercase">Max DEC Dur.</div>
+                                <div class="text-xl font-extrabold text-gray-200"><span id="setCalMaxDEC">2000</span>ms</div>
+                            </div>
+                        </div>
+                        <div class="mt-1 text-[9px] text-gray-500 text-center">
+                            Step Size calculé pour 12 étapes • Max RA/DEC calculés • Min‑move ≈ 0.20 px (pro)
+                        </div>
+                    </div>
+
+                    <!-- 2. AVANT GUIDAGE -->
+                    <div class="p-3 bg-black/30 rounded-lg border border-gray-800">
+                        <div class="text-[11px] font-bold text-gray-300 uppercase mb-2 flex items-center border-b border-gray-700 pb-1">
+                            <i class="fas fa-sliders mr-2 text-green-400"></i>2. Avant Guidage (Réglages)
+                        </div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div class="bg-gray-900/40 border border-gray-800 rounded-lg p-2 text-center">
+                                <div class="text-[9px] text-gray-500 uppercase">Aggr. RA</div>
+                                <div id="setAggrRA" class="text-lg font-extrabold text-red-300">--%</div>
+                            </div>
+                            <div class="bg-gray-900/40 border border-gray-800 rounded-lg p-2 text-center">
+                                <div class="text-[9px] text-gray-500 uppercase">Aggr. DEC</div>
+                                <div id="setAggrDEC" class="text-lg font-extrabold text-blue-300">--%</div>
+                            </div>
+                            <div class="bg-gray-900/40 border border-gray-800 rounded-lg p-2 text-center">
+                                <div class="text-[9px] text-gray-500 uppercase">Expo guide</div>
+                                <div id="setGuideExp" class="text-lg font-extrabold text-white">--s</div>
+                            </div>
+                            <div class="bg-gray-900/40 border border-gray-800 rounded-lg p-2 text-center">
+                                <div class="text-[9px] text-gray-500 uppercase">Min‑move</div>
+                                <div id="setMinMove" class="text-lg font-extrabold text-cyan-200">--"</div>
+                            </div>
+                            <div class="bg-gray-900/40 border border-gray-800 rounded-lg p-2 text-center md:col-span-2">
+                                <div class="text-[9px] text-gray-500 uppercase">Max Duration</div>
+                                <div id="setMaxDur" class="text-lg font-extrabold text-purple-200">--ms</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section Diagnostic Graphique (PRO) -->
+                <div class="card p-4 mb-4 bg-purple-900/10 border border-purple-800">
+                    <div class="flex items-start justify-between gap-3 mb-3">
+                        <h3 class="text-base font-semibold text-white flex items-center">
+                            <i class="fas fa-chart-line mr-2 text-purple-400"></i> Diagnostic Graphique (type PHD2/ASIAIR)
+                        </h3>
+                        <div class="text-[10px] text-gray-500 text-right leading-tight">
+                            <div>Actions en pas de <span class="text-gray-200 font-semibold">5%</span></div>
+                            <div>1 changement → retest 2–3 min</div>
+                        </div>
+                    </div>
+
+                    <!-- Checklist pro ultra rapide -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                        <div class="bg-black/40 rounded p-2 border border-gray-800">
+                            <div class="text-[9px] text-gray-500 uppercase">Priorité 1</div>
+                            <div class="text-[10px] text-gray-300 mt-1">Polar align précis</div>
+                        </div>
+                        <div class="bg-black/40 rounded p-2 border border-gray-800">
+                            <div class="text-[9px] text-gray-500 uppercase">Priorité 2</div>
+                            <div class="text-[10px] text-gray-300 mt-1">Câbles sans traction</div>
+                        </div>
+                        <div class="bg-black/40 rounded p-2 border border-gray-800">
+                            <div class="text-[9px] text-gray-500 uppercase">Priorité 3</div>
+                            <div class="text-[10px] text-gray-300 mt-1">Rigidité / vent</div>
+                        </div>
+                        <div class="bg-black/40 rounded p-2 border border-gray-800">
+                            <div class="text-[9px] text-gray-500 uppercase">Priorité 4</div>
+                            <div class="text-[10px] text-gray-300 mt-1">Réglages ASIAIR</div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <!-- RA -->
+                        <div class="bg-gray-900/50 rounded-lg p-3 border border-gray-800">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="text-[11px] font-bold text-red-400 uppercase">RA (ligne rouge)</div>
+                                <div class="text-[10px] text-gray-500">Symptôme → Cause → Action</div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-center">
+                                <div class="bg-black/40 rounded p-2">
+                                    <div class="mini-guide mb-2">
+                                        <svg viewBox="0 0 120 52" aria-label="RA monte">
+                                            <line class="mini-base" x1="0" y1="26" x2="120" y2="26"/>
+                                            <line class="mini-axis" x1="0" y1="6" x2="0" y2="46"/>
+                                            <g class="mini-animate-scroll">
+                                                <path class="mini-path mini-ra mini-animate-draw" d="M-10,34 C10,34 22,30 38,28 C54,26 66,22 78,18 C90,14 108,12 130,10"/>
+                                            </g>
+                                        </svg>
+                                    </div>
+                                    <div class="text-[9px] text-gray-500 mb-1">Monte 🔺 (dérive)</div>
+                                    <div class="text-[10px] text-gray-300">Sous-correction RA</div>
+                                    <div class="text-[9px] text-green-400 mt-1">Aggr RA: +5%</div>
+                                </div>
+                                <div class="bg-black/40 rounded p-2">
+                                    <div class="mini-guide mb-2">
+                                        <svg viewBox="0 0 120 52" aria-label="RA descend">
+                                            <line class="mini-base" x1="0" y1="26" x2="120" y2="26"/>
+                                            <line class="mini-axis" x1="0" y1="6" x2="0" y2="46"/>
+                                            <g class="mini-animate-scroll">
+                                                <path class="mini-path mini-ra mini-animate-draw" d="M-10,10 C12,12 26,14 40,18 C54,22 66,26 78,30 C92,34 106,36 130,38"/>
+                                            </g>
+                                        </svg>
+                                    </div>
+                                    <div class="text-[9px] text-gray-500 mb-1">Descend 🔻 (dérive)</div>
+                                    <div class="text-[10px] text-gray-300">Sur-correction RA</div>
+                                    <div class="text-[9px] text-green-400 mt-1">Aggr RA: -5%</div>
+                                </div>
+                                <div class="bg-black/40 rounded p-2">
+                                    <div class="mini-guide mb-2">
+                                        <svg viewBox="0 0 120 52" aria-label="RA oscille">
+                                            <line class="mini-base" x1="0" y1="26" x2="120" y2="26"/>
+                                            <line class="mini-axis" x1="0" y1="6" x2="0" y2="46"/>
+                                            <g class="mini-animate-scroll">
+                                                <path class="mini-path mini-ra mini-animate-draw" d="M-10,26 C0,14 12,14 22,26 C32,38 44,38 54,26 C64,14 76,14 86,26 C96,38 108,38 130,26"/>
+                                            </g>
+                                        </svg>
+                                    </div>
+                                    <div class="text-[9px] text-gray-500 mb-1">Oscille 🔁</div>
+                                    <div class="text-[10px] text-gray-300">Seeing / aggr trop haute</div>
+                                    <div class="text-[9px] text-green-400 mt-1">Aggr RA: -10%</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- DEC -->
+                        <div class="bg-gray-900/50 rounded-lg p-3 border border-gray-800">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="text-[11px] font-bold text-blue-400 uppercase">DEC (ligne bleue)</div>
+                                <div class="text-[10px] text-gray-500">Symptôme → Cause → Action</div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-center">
+                                <div class="bg-black/40 rounded p-2">
+                                    <div class="mini-guide mb-2">
+                                        <svg viewBox="0 0 120 52" aria-label="DEC zigzag">
+                                            <line class="mini-base" x1="0" y1="26" x2="120" y2="26"/>
+                                            <line class="mini-axis" x1="0" y1="6" x2="0" y2="46"/>
+                                            <g class="mini-animate-scroll">
+                                                <path class="mini-path mini-dec mini-animate-draw" d="M-10,26 L2,18 L14,34 L26,16 L38,36 L50,18 L62,34 L74,16 L86,36 L98,18 L110,34 L130,26"/>
+                                            </g>
+                                        </svg>
+                                    </div>
+                                    <div class="text-[9px] text-gray-500 mb-1">Zigzag / oscille</div>
+                                    <div class="text-[10px] text-gray-300">Backlash / Min-move bas</div>
+                                    <div class="text-[9px] text-green-400 mt-1">Min‑move: +0.10"</div>
+                                </div>
+                                <div class="bg-black/40 rounded p-2">
+                                    <div class="mini-guide mb-2">
+                                        <svg viewBox="0 0 120 52" aria-label="DEC dérive">
+                                            <line class="mini-base" x1="0" y1="26" x2="120" y2="26"/>
+                                            <line class="mini-axis" x1="0" y1="6" x2="0" y2="46"/>
+                                            <g class="mini-animate-scroll">
+                                                <path class="mini-path mini-dec mini-animate-draw" d="M-10,18 C12,18 28,20 44,22 C60,24 78,26 92,28 C106,30 116,31 130,32"/>
+                                            </g>
+                                        </svg>
+                                    </div>
+                                    <div class="text-[9px] text-gray-500 mb-1">Dérive continue</div>
+                                    <div class="text-[10px] text-gray-300">Polar align imparfait</div>
+                                    <div class="text-[9px] text-green-400 mt-1">Aggr DEC: +5%</div>
+                                </div>
+                                <div class="bg-black/40 rounded p-2">
+                                    <div class="mini-guide mb-2">
+                                        <svg viewBox="0 0 120 52" aria-label="DEC pics">
+                                            <line class="mini-base" x1="0" y1="26" x2="120" y2="26"/>
+                                            <line class="mini-axis" x1="0" y1="6" x2="0" y2="46"/>
+                                            <g class="mini-animate-scroll">
+                                                <path class="mini-path mini-dec mini-animate-draw" d="M-10,26 L10,26 L20,26 L26,8 L32,26 L50,26 L60,26 L66,40 L72,26 L90,26 L100,26 L106,12 L112,26 L130,26"/>
+                                                <path class="mini-path mini-dec mini-animate-pulse" d="M26,8 L26,26"/>
+                                                <path class="mini-path mini-dec mini-animate-pulse" d="M66,40 L66,26"/>
+                                                <path class="mini-path mini-dec mini-animate-pulse" d="M106,12 L106,26"/>
+                                            </g>
+                                        </svg>
+                                    </div>
+                                    <div class="text-[9px] text-gray-500 mb-1">Pics ⚡</div>
+                                    <div class="text-[10px] text-gray-300">Flexure / câble / rafales</div>
+                                    <div class="text-[9px] text-green-400 mt-1">Expo: -0.5s ou +0.5s</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-purple-900/20 rounded-lg p-3 border border-purple-800/50">
+                            <div class="text-[11px] font-bold text-purple-300 uppercase mb-2 flex items-center">
+                                <i class="fas fa-microscope mr-2"></i>Analyses Avancées (Pro)
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="bg-black/40 p-2 rounded border border-gray-800">
+                                    <div class="text-[10px] text-gray-100 font-bold mb-1">Pics identiques RA+DEC ⚡</div>
+                                    <div class="text-[9px] text-gray-400">Origine externe : Rafales de vent, choc trépied ou traction de câble. Ne pas corriger les agressivités.</div>
+                                </div>
+                                <div class="bg-black/40 p-2 rounded border border-gray-800">
+                                    <div class="text-[10px] text-gray-100 font-bold mb-1">DEC “Collé” ❄️</div>
+                                    <div class="text-[9px] text-gray-400">Backlash massif ou équilibrage trop parfait. <span class="text-green-400">Action: Min-move +0.10"</span> et déséquilibre léger en DEC.</div>
+                                </div>
+                                <div class="bg-black/40 p-2 rounded border border-gray-800">
+                                    <div class="text-[10px] text-gray-100 font-bold mb-1">RA Dents de scie 📉</div>
+                                    <div class="text-[9px] text-gray-400">Sur-correction cyclique ou seeing. <span class="text-green-400">Action: Aggr RA -10%</span>, retest 3 min, puis ajuster par pas de 5%.</div>
+                                </div>
+                                <div class="bg-black/40 p-2 rounded border border-gray-800">
+                                    <div class="text-[10px] text-gray-100 font-bold mb-1">RMS bas / Étoiles ovales 🥚</div>
+                                    <div class="text-[9px] text-gray-400">Pas un problème de guidage. Vérifier: Tilt capteur, flexion différentielle ou MAP.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Entrée simple RMS (comme demandé) + recommandations (mode PRO) -->
+                <div class="p-3 bg-black/20 rounded-lg border border-gray-800">
+                    <div class="text-[11px] font-bold text-gray-300 uppercase mb-2">
+                        <i class="fas fa-bullseye mr-2 text-cyan-400"></i>RMS ASIAIR (recopie simple)
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2">
+                        <div class="bg-gray-900/40 border border-gray-700 rounded-lg p-2">
+                            <label class="block text-[10px] text-gray-400 mb-1">RMS RA</label>
+                            <input id="inRmsRA" type="number" step="0.01" min="0" value="0.35" class="w-full p-2 rounded-lg text-[12px]">
+                        </div>
+                        <div class="bg-gray-900/40 border border-gray-700 rounded-lg p-2">
+                            <label class="block text-[10px] text-gray-400 mb-1">RMS DEC</label>
+                            <input id="inRmsDEC" type="number" step="0.01" min="0" value="0.30" class="w-full p-2 rounded-lg text-[12px]">
+                        </div>
+                        <div class="bg-gray-900/40 border border-gray-700 rounded-lg p-2">
+                            <label class="block text-[10px] text-gray-400 mb-1">RMS Total</label>
+                            <input id="inRmsTotal" type="number" step="0.01" min="0" value="0.46" class="w-full p-2 rounded-lg text-[12px]" readonly>
+                        </div>
+                    </div>
+
+                    <div class="mt-3 grid grid-cols-2 gap-2">
+                        <div class="bg-gray-900/50 p-2 rounded-lg border border-gray-700">
+                            <div class="text-[10px] font-bold text-gray-300 uppercase">Réglages actuels (ASIAIR)</div>
+                            <div class="mt-2 grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-[10px] text-gray-400 mb-1">Aggr. RA (%)</label>
+                                    <input id="curAggrRA" type="number" min="0" max="100" step="5" value="60" class="w-full p-2 rounded-lg text-[12px]">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] text-gray-400 mb-1">Aggr. DEC (%)</label>
+                                    <input id="curAggrDEC" type="number" min="0" max="100" step="5" value="60" class="w-full p-2 rounded-lg text-[12px]">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] text-gray-400 mb-1">Expo guide (s)</label>
+                                    <input id="curGuideExp" type="number" min="0.2" max="6" step="0.1" value="2.0" class="w-full p-2 rounded-lg text-[12px]">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] text-gray-400 mb-1">Min‑move (")</label>
+                                    <input id="curMinMove" type="number" min="0" max="3" step="0.05" value="0.20" class="w-full p-2 rounded-lg text-[12px]">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-2 rounded-lg border border-blue-900/30 bg-blue-900/10">
+                            <div class="text-[10px] font-bold text-blue-300 uppercase flex items-center gap-2">
+                                <i class="fas fa-sliders"></i>
+                                <span>Corrections recommandées</span>
+                            </div>
+                            <div id="tuningAdvice" class="mt-1 text-[10px] text-gray-300 leading-relaxed">
+                                Entre tes RMS puis clique « Analyser ».
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-3">
+                        <button id="analyzeRmsBtn" type="button" class="w-full px-3 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-600 active:bg-cyan-800 text-white text-[11px] font-bold">
+                            <i class="fas fa-bullseye mr-2"></i>Analyser → corrections
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Navigation Basse -->
+    <nav id="bottomNav" class="fixed bottom-0 left-0 right-0 bg-[#1a1a1a] border-t border-gray-800 flex justify-around px-2 py-2 z-50">
+        <button onclick="scrollToSection('astro-night-section', this)" class="flex-1 flex flex-col items-center text-red-500 py-1">
+            <i class="fas fa-moon text-lg"></i>
+            <span class="text-[9px] mt-1">Nuit</span>
+        </button>
+        <button onclick="scrollToSection('weather-section', this)" class="flex-1 flex flex-col items-center text-gray-500 hover:text-red-400 py-1">
+            <i class="fas fa-chart-line text-lg"></i>
+            <span class="text-[9px] mt-1">Météo</span>
+        </button>
+        <button onclick="scrollToSection('equipment-section', this)" class="flex-1 flex flex-col items-center text-gray-500 hover:text-red-400 py-1">
+            <i class="fas fa-list text-lg"></i>
+            <span class="text-[9px] mt-1">Matériel</span>
+        </button>
+        <button onclick="scrollToSection('asiair-section', this)" class="flex-1 flex flex-col items-center text-gray-500 hover:text-red-400 py-1">
+            <i class="fas fa-cog text-lg"></i>
+            <span class="text-[9px] mt-1">ASIAIR</span>
+        </button>
+    </nav>
+
+    <script>
+        // Globals - will be filled by GPS or default (Geneva, Switzerland)
+        let currentLat = 46.2044;
+        let currentLon = 6.1432;
+        let currentPlace = 'Genève, Suisse';
+        let currentCountryCode = 'ch';
+        let currentCountryName = 'Suisse';
+
+        let weatherData = null;
+        let astroStart = null;
+        let astroEnd = null;
+
+        const ASTRO_ALT_RAD = -18 * Math.PI / 180;
+
+        // Navigation
+        function scrollToSection(id, el) {
+            const section = document.getElementById(id);
+            if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+            document.querySelectorAll('#bottomNav button').forEach(btn => {
+                btn.classList.remove('text-red-500');
+                btn.classList.add('text-gray-500');
+            });
+            if (el) {
+                el.classList.remove('text-gray-500');
+                el.classList.add('text-red-500');
+            }
+        }
+
+        // Toggle Mode Nuit
+        document.getElementById('toggleNight').addEventListener('click', function() {
+            document.body.classList.toggle('night-mode');
+            const icon = this.querySelector('i');
+            icon.classList.toggle('fa-moon');
+            icon.classList.toggle('fa-sun');
+        });
+
+        // Refresh GPS (à activer pour GPS réel)
+        document.getElementById('refreshGps').addEventListener('click', () => {
+            initApp(true);
+        });
+
+        function setGpsStatusHeader(html) {
+            const el = document.getElementById('gpsStatus');
+            if (el) el.innerHTML = html;
+        }
+
+        // Nouveau calculateur expert ASIAIR
+        function calculateExpertSettings() {
+            const mountId = document.getElementById('mountType').value;
+            const focal = parseFloat(document.getElementById('guideFocalLength').value || 120);
+            const pixel = parseFloat(document.getElementById('guideCamera').value || 3.75);
+            
+            // Détection du type de monture
+            let type = 'worm'; // Défaut
+            if (mountId.includes('am3') || mountId.includes('am5')) type = 'harmonic';
+            if (mountId.includes('star-adventurer') || mountId.includes('az-gti')) type = 'light';
+            
+            const scale = (pixel / focal) * 206.265;
+            
+            // Met à jour le Step Size (ms) à entrer dans ASIAIR (objectif ~12 étapes)
+            updateCalibrationAssistant();
+
+            // Valeurs uniques (pas de fourchettes)
+            let exp, aggrRA, aggrDEC, minMove, maxDur;
+
+            if (type === 'harmonic') {
+                exp = 0.8;
+                aggrRA = 38;
+                aggrDEC = 32;
+                // min-move ~0.20 px (valeur pro)
+                minMove = clamp(scale * 0.20, 0.15, 0.35);
+                maxDur = 250;
+            } else if (type === 'light') {
+                exp = 1.8;
+                aggrRA = 50;
+                aggrDEC = 45;
+                // min-move ~0.20 px (valeur pro)
+                minMove = clamp(scale * 0.20, 0.25, 0.60);
+                maxDur = 800;
+            } else {
+                exp = 2.5;
+                aggrRA = 65;
+                aggrDEC = 55;
+                // min-move ~0.20 px (valeur pro)
+                minMove = clamp(scale * 0.20, 0.25, 0.65);
+                maxDur = 1800;
+            }
+
+            // Calcul unique des Max RA/DEC pour la calibration
+            // NOTE pro: le Step Size dépend du guide rate configuré dans l’ASIAIR.
+            // Valeurs par défaut ici (reco) :
+            // - montures légères (Star Adventurer / AZ-GTi) : 0.9x (souvent utilisé pour éviter Step Size trop grand)
+            // - harmoniques AM3/AM5 : 0.5x
+            // - montures classiques : 0.5x
+            const guideRateX = getSelectedGuideRateX() ?? getDefaultGuideRateX(mountId);
+            const decDeg = 0;
+            const targetSteps = 12;
+            const targetTravelPx = 25;
+            const stepMs = computeCalibrationStepMs({ guideScaleArcsecPx: scale, targetTravelPx, targetSteps, guideRateX, decDeg });
+
+            // Max RA/DEC calibration (valeur unique) :
+            // - on part d’un plafond "type monture" (évite les coups trop longs)
+            // - MAIS on garantit que Max RA/DEC reste > Step Size, sinon l’ASIAIR briderait la calibration.
+            // - marge choisie: 10% (propre, évite de tomber systématiquement sur 2000ms).
+            let calMaxBase = 1500;
+            if (type === 'harmonic') calMaxBase = 800;
+            else if (type === 'light') calMaxBase = 1100;
+            else calMaxBase = 1600;
+
+            const calMaxNeed = Math.round(stepMs * 1.10);
+            let calMax = Math.max(calMaxBase, calMaxNeed);
+            calMax = Math.min(2000, calMax);
+
+            // Update UI (valeurs à entrer)
+            // 1. Calibration
+            // NOTE: dans l’UI, le "ms" est déjà affiché après le <span>.
+            // On garde ici la valeur numérique pour éviter un affichage du type "2000msms".
+            document.getElementById('setCalMaxRA').innerText = String(calMax);
+            document.getElementById('setCalMaxDEC').innerText = String(calMax);
+            
+            // 2. Guidage
+            document.getElementById('setAggrRA').innerText = `${Math.round(aggrRA)}%`;
+            document.getElementById('setAggrDEC').innerText = `${Math.round(aggrDEC)}%`;
+            document.getElementById('setGuideExp').innerText = `${exp.toFixed(1)}s`;
+            document.getElementById('setMinMove').innerText = `${minMove.toFixed(2)}"`;
+            const maxDurEl = document.getElementById('setMaxDur');
+            if (maxDurEl) maxDurEl.innerText = `${Math.round(maxDur)}ms`;
+        }
+
+        // Bandes chauffantes (toggles) + impact conso
+        const mainHeaterToggle = document.getElementById('mainHeaterToggle');
+        const guideHeaterToggle = document.getElementById('guideHeaterToggle');
+        if (mainHeaterToggle) mainHeaterToggle.addEventListener('change', updatePowerEstimate);
+        if (guideHeaterToggle) guideHeaterToggle.addEventListener('change', updatePowerEstimate);
+
+        // ====== Mode PRO (simple) : tu entres seulement RMS RA/DEC (ASIAIR) + tes réglages actuels ======
+        // Objectif : donner une correction chiffrée en pas de 5% (comme ASIAIR), sans logs.
+        function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+        function updateRmsTotalInput() {
+            const ra = parseFloat(document.getElementById('inRmsRA')?.value || 0);
+            const dec = parseFloat(document.getElementById('inRmsDEC')?.value || 0);
+            const tot = Math.sqrt(ra * ra + dec * dec);
+            const el = document.getElementById('inRmsTotal');
+            if (el) el.value = Number.isFinite(tot) ? tot.toFixed(2) : '0.00';
+        }
+
+        function analyzeRmsAndRecommend() {
+            updateRmsTotalInput();
+
+            const rmsRA = parseFloat(document.getElementById('inRmsRA')?.value || 0);
+            const rmsDEC = parseFloat(document.getElementById('inRmsDEC')?.value || 0);
+            const rmsTot = Math.sqrt(rmsRA * rmsRA + rmsDEC * rmsDEC);
+
+            const curRA = parseFloat(document.getElementById('curAggrRA')?.value || 60);
+            const curDEC = parseFloat(document.getElementById('curAggrDEC')?.value || 60);
+            const curExp = parseFloat(document.getElementById('curGuideExp')?.value || 2.0);
+            const curMM = parseFloat(document.getElementById('curMinMove')?.value || 0.20);
+
+            const mountClass = getMountGuideClass(document.getElementById('mountType')?.value || '');
+            // Cibles raisonnables (dépend du setup/seeing) — utilisées uniquement pour décider de la direction.
+            const target = mountClass === 'harmonic' ? 0.55 : mountClass === 'light' ? 0.85 : 0.70;
+
+            // Corrections par incréments ASIAIR (5%)
+            let dRA = 0, dDEC = 0;
+            let dExp = 0, dMM = 0;
+
+            // Si on est au-dessus : on augmente l'axe dominant
+            if (rmsTot > target) {
+                if (rmsRA > rmsDEC * 1.10) dRA = +5;
+                else if (rmsDEC > rmsRA * 1.10) dDEC = +5;
+                else { dRA = +5; dDEC = +5; }
+
+                // min-move trop haut = corrections trop rares
+                if (curMM > 0.30) dMM = -0.05;
+            }
+
+            // Si très bas : éviter de chasser la turbulence
+            if (rmsTot > 0 && rmsTot < target * 0.70) {
+                dRA = -5;
+                dDEC = -5;
+                if (mountClass !== 'harmonic' && curExp < 3.0) dExp = +0.5;
+                if (curMM < 0.15) dMM = +0.05;
+            }
+
+            const newRA = clamp(Math.round((curRA + dRA) / 5) * 5, 0, 100);
+            const newDEC = clamp(Math.round((curDEC + dDEC) / 5) * 5, 0, 100);
+            const newExp = clamp(Math.round((curExp + dExp) * 10) / 10, 0.2, 6);
+            const newMM = clamp(Math.round((curMM + dMM) * 100) / 100, 0, 3);
+
+            const lines = [];
+            lines.push(`<div class="text-[10px] text-gray-400">RMS total: <span class="text-green-300 font-bold">${rmsTot.toFixed(2)}\"</span> • Cible (type monture): <span class="text-gray-200">${target.toFixed(2)}\"</span></div>`);
+
+            if (dRA === 0 && dDEC === 0 && dExp === 0 && dMM === 0) {
+                lines.push(`<div class="text-[10px]"><span class="text-green-300 font-bold">OK</span> : ne change rien. (Si tu vois une oscillation sur le graphe ASIAIR, baisse l'axe concerné de 5%.)</div>`);
+            } else {
+                lines.push(`<div class="text-[10px]">Réglages conseillés :</div>`);
+                lines.push(`<div class="text-[10px]">• Aggr RA → <span class="text-cyan-200 font-bold">${newRA}%</span> (${dRA>=0?'+':''}${dRA}%)</div>`);
+                lines.push(`<div class="text-[10px]">• Aggr DEC → <span class="text-cyan-200 font-bold">${newDEC}%</span> (${dDEC>=0?'+':''}${dDEC}%)</div>`);
+                if (dExp !== 0) lines.push(`<div class="text-[10px]">• Expo guide → <span class="text-cyan-200 font-bold">${newExp.toFixed(1)}s</span> (${dExp>0?'+':''}${dExp.toFixed(1)}s)</div>`);
+                if (dMM !== 0) lines.push(`<div class="text-[10px]">• Min‑move → <span class="text-cyan-200 font-bold">${newMM.toFixed(2)}\"</span> (${dMM>0?'+':''}${dMM.toFixed(2)}\")</div>`);
+            }
+
+            const ta = document.getElementById('tuningAdvice');
+            if (ta) ta.innerHTML = lines.join('');
+        }
+
+        document.getElementById('inRmsRA')?.addEventListener('input', updateRmsTotalInput);
+        document.getElementById('inRmsDEC')?.addEventListener('input', updateRmsTotalInput);
+        document.getElementById('analyzeRmsBtn')?.addEventListener('click', analyzeRmsAndRecommend);
+
+        // Bouton Recalcul
+        document.getElementById('recalcBtn')?.addEventListener('click', () => {
+            updateCalibrationAssistant();
+            calculateExpertSettings();
+        });
+
+        updateRmsTotalInput();
+
+        // Cartes de consommation approximative (W) et capacités batteries (Wh)
+        const powerMapMount = {
+            'skywatcher-star-adventurer-gti': 10,
+            'skywatcher-star-adventurer-pro': 5,
+            'skywatcher-az-gti': 7,
+            'skywatcher-eq6r-pro': 18,
+            'skywatcher-heq5-pro': 15,
+            'skywatcher-eq8': 35,
+            'skywatcher-eq3-pro': 10,
+            'skywatcher-eq5-pro': 12,
+            'zwo-am3': 24,
+            'zwo-am5': 28,
+            'ioptron-cem26': 10,
+            'ioptron-cem40': 15,
+            'ioptron-cem60': 25,
+            'ioptron-cem70': 30,
+            'ioptron-gem45': 18,
+            'ioptron-ieq30pro': 12,
+            'ioptron-skyguider-pro': 5,
+            'losmandy-g11': 25,
+            'losmandy-gm8': 18,
+            '10micron-gm1000': 40,
+            '10micron-gm2000': 60,
+            'astrophysics-900gto': 35,
+            'astrophysics-1100gto': 40,
+            'astrophysics-1200gto': 45,
+            'planewave-l-350': 120,
+            'planewave-l-500': 150,
+            'takahashi-em200': 20,
+            'takahashi-em400': 30,
+            'vixen-gp2': 8,
+            'vixen-sphinx': 15,
+            'fornax-lighttrack-ii': 5
+        };
+
+        const powerMapMainCamera = {
+            'zwo-asi2600mm-pro': 17,
+            'zwo-asi6200mm-pro': 22,
+            'zwo-asi533mc-pro': 12,
+            'zwo-asi678mc': 5,
+            'zwo-asi294mc-pro': 12,
+            'zwo-asi183mc-pro': 10,
+            'zwo-asi183mm-pro': 10,
+            'zwo-asi1600mm-pro': 12,
+            'zwo-asi071mc-pro': 15,
+            'zwo-asi224mc': 3,
+            'zwo-asi462mc': 3,
+            'qhy268c': 18,
+            'qhy600ph-all-sky': 25,
+            'qhy247c': 15,
+            'qhy183m': 10,
+            'qhy163m': 10,
+            'qhy128c': 18,
+            'atik-horizon': 15,
+            'atik-383l': 18,
+            'atik-460ex': 10,
+            'atik-11000': 20,
+            'sbig-stf8300': 18,
+            'sbig-stx-16803': 35,
+            'moravian-c3-6100': 22,
+            'moravian-g3-11000': 25,
+            'player-one-mars-m2-pro': 5,
+            'player-one-ares-m': 5,
+            'player-one-saturn-m': 5,
+            'fli-microline-16200': 30,
+            'fli-proline-16803': 40
+        };
+        
+        const powerMapDSLR = {
+            'canon-eos-ra': 5, 'canon-eos-r5': 6, 'canon-eos-r6': 6, 'canon-eos-6d-mk2': 5, 'canon-eos-5d-mk4': 6,
+            'canon-eos-600d': 5, 'canon-eos-2000d': 5,
+            'nikon-z6ii': 6, 'nikon-z7ii': 6, 'nikon-d850': 6, 'nikon-d780': 6, 
+            'nikon-d5600': 5, 'nikon-d5300': 5, 'nikon-d7500': 6, 'nikon-z50': 5,
+            'sony-a7siii': 6, 'sony-a7iv': 6, 'sony-a7riv': 6, 'sony-a6000': 5, 'sony-a6600': 5,
+            'fuji-xt4': 6, 'fuji-xh2s': 6, 'pentax-k1': 6, 'olympus-omd': 5
+        };
+
+        const powerMapAsiair = {
+            'plus': 6,
+            'plus2': 6,
+            'mini': 5,
+            'mini2': 5,
+            'pro': 6,
+            'max': 8,
+            'other': 6
+        };
+
+        const powerMapBatteryWh = {
+            'celestron-powertank-pro': 159,
+            'celestron-powertank-lithium': 84,
+            'pegasus-powerbox-advance': 0,
+            'pegasus-pocket-powerbox': 0,
+            'talon-ultimate-lipo': 144,
+            'ped-power-expander': 0,
+            'shoptronics-36000': 133,
+            'goalzero-sherpa100ac': 94,
+            'anker-powercore-26800': 96,
+            'bialetti-268': 96,
+            'ecoflow-river-2': 256,
+            'jackery-explorer-240': 240,
+            // Bluetti
+            // EB3A: 268Wh (LiFePO4)
+            'bluetti-eb3a': 268,
+            'goalzero-yeti-150': 168,
+            'ravpower-26800': 96,
+            'xiaomi-powerbank-3': 74,
+            'anker-powercore-iii': 69,
+            'maxoak-eb150': 1500,
+            'renogy-phoenix-200': 189
+        };
+
+        function isHeaterOn(type) {
+            if (type === 'main') return !!document.getElementById('mainHeaterToggle')?.checked;
+            if (type === 'guide') return !!document.getElementById('guideHeaterToggle')?.checked;
+            return false;
+        }
+
+        // ========= POIDS (charge utile sur monture) =========
+        // Poids approximatifs (kg) : uniquement ce qui est physiquement sur la monture.
+        // EXCLU: batterie nomade, piles AA, batteries séparées.
+        const weightMapMountHead = {
+            'skywatcher-star-adventurer-gti': 1.8,
+            'skywatcher-az-gti': 1.3,
+            'zwo-am3': 3.9,
+            'zwo-am5': 5.9,
+            'skywatcher-heq5-pro': 10.0,
+            'skywatcher-eq6r-pro': 17.3
+        };
+
+        const weightMapScope = {
+            // SkyWatcher (OTA only) — valeurs indicatives.
+            // IMPORTANT: la clé 400 est utilisée par plusieurs instruments (Evolux 62ED, Esprit 80ED...).
+            // Pour ton Evolux 62ED, tu as indiqué 2.5 kg (fournisseur) : on aligne ici.
+            400: 2.50,  // Evolux 62ED (400mm) ≈ 2.5kg
+            420: 2.10,
+            500: 3.20,
+            550: 4.50,
+            600: 3.80,
+            700: 6.80,
+            714: 6.00,
+            800: 8.50,
+            900: 7.50,
+            1000: 9.50,
+            1200: 12.00,
+            2032: 5.70,
+            2350: 9.50,
+            2800: 12.50,
+            3556: 20.00
+        };
+
+        const weightMapMainCamera = {
+            'zwo-asi183mc-pro': 0.41,
+            'zwo-asi183mm-pro': 0.41,
+            'zwo-asi533mc-pro': 0.47,
+            'zwo-asi2600mm-pro': 0.70,
+            'zwo-asi294mc-pro': 0.52,
+            'zwo-asi678mc': 0.13
+        };
+
+        const weightMapGuideScope = {
+            120: 0.25, // SVBony 30/120 mini guide
+            180: 0.45,
+            190: 0.55,
+            240: 0.80,
+            400: 1.20,
+            oag: 0.15
+        };
+
+        const weightMapGuideCamera = {
+            3.75: 0.06, // ASI120 Mini ~60g
+            2.9: 0.06,
+            5.86: 0.07,
+            2.4: 0.06,
+            7.4: 0.10,
+            8.2: 0.12
+        };
+
+        const weightMapAsiair = {
+            'plus': 0.30,
+            'plus2': 0.30,
+            'mini': 0.18,
+            'mini2': 0.18,
+            'pro': 0.28,
+            'max': 0.35,
+            'other': 0.20
+        };
+
+        const weightMapFilterWheel = {
+            'zwo-eFW': 0.30,
+            'zwo-efw-8': 0.30,
+            'zwo-mFW': 0.70,
+            'qhy-m': 0.25,
+            'qhy-cfw': 0.50,
+            'atik-efw2': 0.35,
+            'atik-efw3': 0.45,
+            'fli-cfw': 0.90,
+            'moravian-fw': 0.55,
+            'astrogear-afw': 0.40
+        };
+
+        const weightMapFilterDrawer = {
+            'manual-2in': 0.12,
+            'manual-1.25in': 0.10,
+            'motorized': 0.20
+        };
+
+        const weightMapEaf = {
+            'zwo-eaf': 0.29,
+            'pegasus-focus-cube': 0.33,
+            'zwo-efc': 0.30,
+            'moonlite-nlbfocus': 0.35
+        };
+
+        function updatePayloadEstimate() {
+            const payloadEl = document.getElementById('payloadKg');
+            if (!payloadEl) return;
+
+            // Poids sur la monture = UNIQUEMENT ce qui est physiquement fixé sur la monture.
+            // EXCLU: batterie nomade, piles AA, batteries séparées.
+
+            // IMPORTANT "pro": dans les listes actuelles, plusieurs instruments partagent la même valeur (ex: 400mm).
+            // On utilise donc un poids "par focale" (approx) + un bonus accessoires. Pour ton Evolux 62ED 400mm, c'est 2.50kg (confirmé fournisseur).
+
+            // Scope
+            const scopeKey = parseFloat(document.getElementById('telescope')?.value || '0');
+            const scopeW = weightMapScope[scopeKey] || 0;
+
+            // Main astro camera
+            const mainCamKey = document.getElementById('mainCamera')?.value || '';
+            const mainCamW = weightMapMainCamera[mainCamKey] || 0;
+
+            // Guide scope
+            const guideScopeVal = document.getElementById('guideScope')?.value || '';
+            const guideScopeKey = guideScopeVal === 'oag' ? 'oag' : parseFloat(guideScopeVal || '0');
+            const guideScopeW = weightMapGuideScope[guideScopeKey] || 0;
+
+            // Guide camera
+            const guideCamKey = parseFloat(document.getElementById('guideCamera')?.value || '0');
+            const guideCamW = weightMapGuideCamera[guideCamKey] || 0;
+
+            // ASIAIR (sur monture)
+            const asiairKey = document.getElementById('asiair')?.value || '';
+            const asiairW = weightMapAsiair[asiairKey] || 0;
+
+            // Filter wheel + Filter drawer + EAF
+            const fwKey = document.getElementById('filterWheel')?.value || '';
+            const fwW = weightMapFilterWheel[fwKey] || 0;
+
+            const fdKey = document.getElementById('filterDrawer')?.value || '';
+            const fdW = weightMapFilterDrawer[fdKey] || 0;
+
+            const eafKey = document.getElementById('eaf')?.value || '';
+            const eafW = weightMapEaf[eafKey] || 0;
+
+            // Accessoires fixés sur la monture (queue d’aronde, colliers, bagues, câbles)
+            // Valeur par défaut : 0.65 kg
+            const misc = 0.65;
+
+            const payload = scopeW + mainCamW + guideScopeW + guideCamW + asiairW + fwW + fdW + eafW + misc;
+            payloadEl.textContent = payload > 0 ? payload.toFixed(2) : '--';
+        }
+
+        function updatePowerEstimate() {
+            const mountKey = document.getElementById('mountType')?.value || '';
+            const mountPowerSource = document.getElementById('mountPowerSource')?.value || 'main';
+            const camKey = document.getElementById('mainCamera')?.value || '';
+            const dslrKey = document.getElementById('dslrCamera')?.value || '';
+            const asiairKey = document.getElementById('asiair')?.value || '';
+            const batteryKey = document.getElementById('battery')?.value || '';
+
+            // IMPORTANT (pro) :
+            // - La partie "Setup APN" ne doit PAS impacter l'autonomie de la batterie nomade
+            //   (trépied/usage séparé). Donc l'APN n'est pas compté ici.
+            // - La monture n'est comptée que si elle est sur la batterie nomade.
+
+            let totalW = 0;
+
+            // Badge "Monture" (repère rapide)
+            const badge = document.getElementById('mountPowerBadge');
+            if (badge) {
+                let label = 'Monture: ?';
+                let cls = 'text-gray-300 border-gray-700 bg-gray-900';
+
+                if (mountPowerSource === 'main') {
+                    label = 'Monture: nomade';
+                    cls = 'text-green-200 border-green-800 bg-green-900/30';
+                } else if (mountPowerSource === 'aa') {
+                    label = 'Monture: piles';
+                    cls = 'text-gray-200 border-gray-700 bg-gray-900';
+                } else if (mountPowerSource === 'separate') {
+                    label = 'Monture: séparée';
+                    cls = 'text-gray-200 border-gray-700 bg-gray-900';
+                }
+
+                badge.textContent = label;
+                badge.className = `text-[10px] px-1.5 py-0.5 rounded border ${cls}`;
+            }
+
+            // Monture : comptée uniquement si alimentée par la batterie nomade
+            if (mountPowerSource === 'main' && powerMapMount[mountKey]) {
+                totalW += powerMapMount[mountKey];
+            }
+
+            // Caméra astro (setup sur monture)
+            if (powerMapMainCamera[camKey]) totalW += powerMapMainCamera[camKey];
+
+            // ASIAIR (setup sur monture)
+            if (powerMapAsiair[asiairKey]) totalW += powerMapAsiair[asiairKey];
+
+            // Bandes chauffantes (setup sur monture) ~8W chacune quand ON
+            if (isHeaterOn('main')) totalW += 8;
+            if (isHeaterOn('guide')) totalW += 8;
+
+            // Note: DSLR/APN non inclus volontairement (setup trépied)
+            void(dslrKey);
+
+            const capacityWh = powerMapBatteryWh[batteryKey] || 0;
+
+            document.getElementById('powerTotal').textContent = totalW ? totalW.toFixed(1) : '--';
+            const pInline = document.getElementById('powerTotalInline');
+            if (pInline) pInline.textContent = totalW ? totalW.toFixed(1) : '--';
+            document.getElementById('batteryCapacity').textContent = capacityWh ? capacityWh.toFixed(0) : '--';
+
+            const runtimeEl = document.getElementById('runtimeEstimate');
+            if (totalW > 0 && capacityWh > 0) {
+                // Rendement réaliste (convertisseurs, câbles, froid)
+                const eff = 0.85;
+                const hours = (capacityWh * eff) / totalW;
+                const h = Math.floor(hours);
+                const m = Math.round((hours - h) * 60);
+                runtimeEl.textContent = `${h}h${m.toString().padStart(2,'0')}`;
+                runtimeEl.classList.toggle('text-green-400', hours >= 5);
+                runtimeEl.classList.toggle('text-yellow-400', hours > 2 && hours < 5);
+                runtimeEl.classList.toggle('text-red-400', hours <= 2);
+            } else {
+                runtimeEl.textContent = '--h--';
+                runtimeEl.classList.remove('text-green-400','text-yellow-400','text-red-400');
+            }
+
+            // Recalcule aussi la charge utile (poids sur monture)
+            updatePayloadEstimate();
+        }
+
+        // Logic APN & Règle 500
+        const dslrSelect = document.getElementById('dslrCamera');
+        const lensSelect = document.getElementById('lensObjective');
+        const tripodInfo = document.getElementById('tripodRuleInfo');
+        const rule500Res = document.getElementById('rule500Result');
+
+        function updateTripodRule() {
+            const crop = parseFloat(dslrSelect.options[dslrSelect.selectedIndex].getAttribute('data-crop') || 1);
+            // Priorité à l'objectif photo si sélectionné, sinon utilise mainFocalLength
+            let focal = 14; // Défaut grand angle
+            if (lensSelect && lensSelect.value) {
+                focal = parseFloat(lensSelect.value);
+            } else {
+                focal = parseFloat(document.getElementById('mainFocalLength').value || 14);
+            }
+
+            const hasDslr = !!dslrSelect.value;
+            const hasLens = !!(lensSelect && lensSelect.value);
+
+            if (hasDslr && hasLens) {
+                tripodInfo.classList.remove('hidden');
+                // Règle "500" adaptée au crop: 500 / (focale * crop)
+                // (ex: APS-C Nikon crop 1.5 => temps plus court)
+                const maxExp = 500 / (focal * crop);
+                rule500Res.textContent = maxExp.toFixed(1) + ' s';
+            } else {
+                tripodInfo.classList.add('hidden');
+                rule500Res.textContent = '-- s';
+            }
+            updatePowerEstimate(); // L'APN consomme aussi
+        }
+
+        if(dslrSelect) {
+            dslrSelect.addEventListener('change', updateTripodRule);
+        }
+        if(lensSelect) {
+            lensSelect.addEventListener('change', updateTripodRule);
+        }
+        // Mise à jour si on change la focale (zoom ou autre instrument)
+        document.getElementById('mainFocalLength').addEventListener('input', updateTripodRule);
+
+
+        // Recalcul complet (conso, poids, ASIAIR) quand on change le matériel
+        ['mountType','mountPowerSource','mainCamera','dslrCamera','asiair','battery','telescope','reducerBarlow','guideScope','guideCamera','guideFocalLength','filterWheel','filterDrawer','eaf','guideRate'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', () => {
+                updatePowerEstimate();
+                updatePayloadEstimate();
+                updateCalibrationAssistant(); // Recalcul Step Size
+                calculateExpertSettings(); // Met à jour les réglages ASIAIR en direct
+            });
+        });
+        // Met aussi à jour l'affichage règle trépied quand l'APN ou l'objectif change
+        if (dslrSelect) dslrSelect.addEventListener('change', updateTripodRule);
+        if (lensSelect) lensSelect.addEventListener('change', updateTripodRule);
+
+        function nationalMeteoService(countryCode) {
+            const cc = (countryCode || '').toLowerCase();
+            const map = {
+                ch: 'MeteoSwiss',
+                fr: 'Météo-France',
+                es: 'AEMET',
+                it: 'MeteoAM',
+                de: 'DWD',
+                at: 'ZAMG',
+                be: 'IRM / KMI',
+                nl: 'KNMI',
+                gb: 'uk: Met Office',
+                pt: 'IPMA',
+                us: 'NOAA',
+                ca: 'ECCC'
+            };
+            return map[cc] || 'Service national';
+        }
+
+        function parseLocalDateTime(dt) {
+            try {
+                const [d, t] = dt.split('T');
+                const [y, m, day] = d.split('-').map(Number);
+                const [hh, mm] = t.split(':').map(Number);
+                return new Date(y, m - 1, day, hh, mm || 0);
+            } catch (e) {
+                return new Date(dt);
+            }
+        }
+
+        function formatTime(date) {
+            if (!date || isNaN(date.getTime())) return '--h--';
+            return `${date.getHours().toString().padStart(2,'0')}h${date.getMinutes().toString().padStart(2,'0')}`;
+        }
+
+        function getCardinal(angle) {
+            const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
+            return dirs[Math.round(angle / 45) % 8];
+        }
+
+        function computeAstroNightWindowRobust() {
+            const now = new Date();
+            const todayNoon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
+            const yesterdayNoon = new Date(todayNoon.getTime() - 86400000);
+            const tomorrowNoon = new Date(todayNoon.getTime() + 86400000);
+
+            const tToday = SunCalc.getTimes(todayNoon, currentLat, currentLon);
+            const tYest = SunCalc.getTimes(yesterdayNoon, currentLat, currentLon);
+            const tTom = SunCalc.getTimes(tomorrowNoon, currentLat, currentLon);
+
+            const dawnToday = tToday.nightEnd;
+            const duskYest = tYest.night;
+            const duskToday = tToday.night;
+            const dawnTom = tTom.nightEnd;
+
+            if (now < dawnToday && duskYest) return { start: duskYest, end: dawnToday };
+            if (duskToday && dawnTom) return { start: duskToday, end: dawnTom };
+            return { start: null, end: null };
+        }
+
+        // ... (reste du script identique à la version fournie, avec GPS activé)
+        async function getLocation() {
+            return new Promise((resolve, reject) => {
+                if (!navigator.geolocation) {
+                    resolve(false);
+                    return;
+                }
+                navigator.geolocation.getCurrentPosition(
+                    async (pos) => {
+                        currentLat = pos.coords.latitude;
+                        currentLon = pos.coords.longitude;
+                        // Reverse geocoding to get address
+                        try {
+                            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${currentLat}&lon=${currentLon}&accept-language=fr`);
+                            const data = await response.json();
+                            if (data.address) {
+                                const town = data.address.town || data.address.city || data.address.village || data.address.municipality || '';
+                                const country = data.address.country || '';
+                                const countryCode = data.address.country_code || 'ch';
+                                currentPlace = town ? `${town}, ${country}` : country;
+                                currentCountryCode = countryCode;
+                                currentCountryName = country;
+                            }
+                        } catch (e) {
+                            console.log('Geocoding error:', e);
+                        }
+                        resolve(true);
+                    },
+                    (err) => {
+                        console.log('Geolocation error:', err);
+                        resolve(false);
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
+            });
+        }
+
+        async function initApp(force) {
+            if (force) {
+                // Force GPS refresh
+                const located = await getLocation();
+                if (located) {
+                    setGpsStatusHeader(`<i class="fas fa-check-circle text-green-500 mr-1"></i>${currentPlace}`);
+                } else {
+                    setGpsStatusHeader(`<i class="fas fa-exclamation-triangle text-yellow-500 mr-1"></i>GPS non disponible (mode manuel)`);
+                }
+            } else {
+                setGpsStatusHeader(`<i class="fas fa-check-circle text-green-500 mr-1"></i>${currentPlace}`);
+            }
+            await loadAllData();
+        }
+
+        async function loadAllData() {
+            await loadLocationName();
+            loadAstroNight();
+            loadMoonData();
+            await loadWeatherData();
+            await estimateBortle();
+        }
+
+        function loadLocationName() { /* sim */ }
+
+        function loadAstroNight() {
+            const win = computeAstroNightWindowRobust();
+            astroStart = win.start;
+            astroEnd = win.end;
+            if (astroStart && astroEnd) {
+                document.getElementById('astroStart').textContent = formatTime(astroStart);
+                document.getElementById('astroEnd').textContent = formatTime(astroEnd);
+                const durMs = astroEnd - astroStart;
+                const durH = Math.floor(durMs / 3600000);
+                const durM = Math.floor((durMs % 3600000) / 60000);
+                document.getElementById('astroDuration').textContent = `${durH}h${durM.toString().padStart(2, '0')}`;
+            } else {
+                document.getElementById('astroStart').textContent = '--h--';
+                document.getElementById('astroEnd').textContent = '--h--';
+                document.getElementById('astroDuration').textContent = '--h--';
+            }
+        }
+
+        function loadMoonData() {
+            const moonTimes = SunCalc.getMoonTimes(new Date(), currentLat, currentLon);
+            const moonIllum = SunCalc.getMoonIllumination(new Date());
+            const moonPosition = SunCalc.getMoonPosition(new Date(), currentLat, currentLon);
+            
+            // Phase icon
+            const phase = moonIllum.phase;
+            let icon = '🌑';
+            if (phase < 0.125) icon = '🌑';
+            else if (phase < 0.25) icon = '🌒';
+            else if (phase < 0.375) icon = '🌓';
+            else if (phase < 0.5) icon = '🌔';
+            else if (phase < 0.625) icon = '🌕';
+            else if (phase < 0.75) icon = '🌖';
+            else if (phase < 0.875) icon = '🌗';
+            else icon = '🌘';
+            document.getElementById('moonPhaseIcon').textContent = icon;
+            
+            // Illumination percentage
+            document.getElementById('moonIllum').textContent = `${Math.round(moonIllum.fraction * 100)}% illuminée`;
+            
+            // Rise and set
+            document.getElementById('moonRise').textContent = moonTimes.rise ? formatTime(moonTimes.rise) : '--h--';
+            document.getElementById('moonSet').textContent = moonTimes.set ? formatTime(moonTimes.set) : '--h--';
+            
+            // Current altitude and azimuth
+            const altDeg = Math.round(moonPosition.altitude * 180 / Math.PI);
+            const azDeg = Math.round(moonPosition.azimuth * 180 / Math.PI);
+            document.getElementById('moonAlt').textContent = `${altDeg}°`;
+            document.getElementById('moonAz').textContent = `${azDeg}°`;
+            document.getElementById('moonDir').textContent = getCardinal(azDeg);
+        }
+
+        async function loadWeatherData() {
+            const weatherLoader = document.getElementById('weatherLoader');
+            const weatherTable = document.getElementById('weatherTable');
+            const weatherMeta = document.getElementById('weatherMeta');
+            const optimalWindow = document.getElementById('optimalWindow');
+            const optText = document.getElementById('optText');
+            
+            weatherLoader.classList.remove('hidden');
+            weatherTable.innerHTML = '';
+            optimalWindow.classList.add('hidden');
+            
+            try {
+                // Use Open-Meteo API
+                const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${currentLat}&longitude=${currentLon}&hourly=cloudcover,precipitation_probability,temperature_2m,windspeed_10m,relativehumidity_2m&timezone=auto&forecast_days=2`);
+                const data = await response.json();
+                
+                if (!data.hourly) throw new Error('No hourly data');
+                
+                weatherData = data;
+                
+                // Update meta
+                weatherMeta.innerHTML = `Source: Open‑Meteo • ${nationalMeteoService(currentCountryCode)}`;
+                
+                // Compute astro night window
+                const win = computeAstroNightWindowRobust();
+                astroStart = win.start;
+                astroEnd = win.end;
+                
+                if (!astroStart || !astroEnd) {
+                    weatherTable.innerHTML = '<div class="text-gray-400 text-center py-4">Pas de nuit astronomique ce soir.</div>';
+                    weatherLoader.classList.add('hidden');
+                    return;
+                }
+                
+                // Filter hours within astro night
+                const hourly = data.hourly;
+                const nightHours = [];
+                for (let i = 0; i < hourly.time.length; i++) {
+                    const hourTime = parseLocalDateTime(hourly.time[i]);
+                    if (hourTime >= astroStart && hourTime <= astroEnd) {
+                        nightHours.push({
+                            time: hourTime,
+                            cloudcover: hourly.cloudcover[i],
+                            precipitation_probability: hourly.precipitation_probability[i],
+                            temperature: hourly.temperature_2m[i],
+                            windspeed: hourly.windspeed_10m[i],
+                            humidity: hourly.relativehumidity_2m[i]
+                        });
+                    }
+                }
+                
+                if (nightHours.length === 0) {
+                    weatherTable.innerHTML = '<div class="text-gray-400 text-center py-4">Aucune heure dans la nuit astronomique.</div>';
+                    weatherLoader.classList.add('hidden');
+                    return;
+                }
+                
+                // Determine optimal window (longest streak of TOP conditions)
+                let bestStart = 0, bestLength = 0;
+                let currentStart = 0, currentLength = 0;
+                for (let i = 0; i < nightHours.length; i++) {
+                    const h = nightHours[i];
+                    const isTop = h.cloudcover <= 30 && h.precipitation_probability <= 20 && h.windspeed <= 30;
+                    if (isTop) {
+                        currentLength++;
+                        if (currentLength > bestLength) {
+                            bestLength = currentLength;
+                            bestStart = currentStart;
+                        }
+                    } else {
+                        currentStart = i + 1;
+                        currentLength = 0;
+                    }
+                }
+                
+                // Build hourly cards
+                weatherTable.innerHTML = '';
+                nightHours.forEach((h, idx) => {
+                    const isTop = h.cloudcover <= 30 && h.precipitation_probability <= 20 && h.windspeed <= 30;
+                    const isVoile = h.cloudcover <= 70 && h.precipitation_probability <= 50 && h.windspeed <= 50;
+                    const status = isTop ? 'TOP' : isVoile ? 'VOILE' : 'STOP';
+                    const statusColor = isTop ? 'bg-green-500' : isVoile ? 'bg-yellow-500' : 'bg-red-500';
+                    
+                    // Estimate seeing (simplified model)
+                    let seeing = 1.5; // arcseconds
+                    if (h.cloudcover > 70) seeing = 3.0;
+                    else if (h.cloudcover > 40) seeing = 2.0;
+                    if (h.windspeed > 40) seeing += 1.0;
+                    if (h.precipitation_probability > 30) seeing += 0.5;
+                    
+                    const card = document.createElement('div');
+                    card.className = 'flex-shrink-0 w-24 card p-2 text-center';
+                    card.innerHTML = `
+                        <div class="text-[10px] text-gray-400">${formatTime(h.time).replace('h', 'h')}</div>
+                        <div class="mt-1 ${statusColor} text-white text-[10px] font-bold py-0.5 rounded">${status}</div>
+                        <div class="mt-1 text-[11px] font-bold">${Math.round(h.temperature)}°C</div>
+                        <div class="mt-2 text-[9px] text-gray-300 space-y-0.5">
+                            <div class="flex justify-between"><span>☁️</span><span>${h.cloudcover}%</span></div>
+                            <div class="flex justify-between"><span>🌧️</span><span>${h.precipitation_probability}%</span></div>
+                            <div class="flex justify-between"><span>💨</span><span>${Math.round(h.windspeed)}km/h</span></div>
+                            <div class="flex justify-between"><span>💧</span><span>${h.humidity}%</span></div>
+                        </div>
+                        <div class="mt-2 text-[9px] text-cyan-300 font-semibold">
+                            ${seeing.toFixed(1)}"
+                        </div>
+                    `;
+                    weatherTable.appendChild(card);
+                });
+                
+                // Show optimal window if found
+                if (bestLength >= 2) {
+                    const startHour = formatTime(nightHours[bestStart].time);
+                    const endHour = formatTime(nightHours[bestStart + bestLength - 1].time);
+                    optText.textContent = `Fenêtre optimale: ${startHour} → ${endHour} (${bestLength}h)`;
+                    optimalWindow.classList.remove('hidden');
+                }
+                
+                weatherLoader.classList.add('hidden');
+                
+            } catch (error) {
+                console.error('Weather fetch error:', error);
+                weatherTable.innerHTML = '<div class="text-red-400 text-center py-4">Erreur de chargement météo.</div>';
+                weatherLoader.classList.add('hidden');
+            }
+        }
+
+        async function estimateBortle() {
+            try {
+                // Try to fetch from lightpollutionmap.info
+                const response = await fetch(`https://www.lightpollutionmap.info/QueryRaster/?ql=wa_2015&qt=point&qd=${currentLon},${currentLat}`);
+                const text = await response.text();
+                // Response format: "0,0,0,0,0,0|20.3" where last value is SQM
+                const parts = text.split('|');
+                if (parts.length >= 2) {
+                    const sqm = parseFloat(parts[parts.length - 1]);
+                    if (!isNaN(sqm)) {
+                        // Convert SQM to Bortle scale (approximation)
+                        let bortle = 9;
+                        if (sqm >= 21.9) bortle = 1;
+                        else if (sqm >= 21.8) bortle = 2;
+                        else if (sqm >= 21.6) bortle = 3;
+                        else if (sqm >= 21.4) bortle = 4;
+                        else if (sqm >= 20.9) bortle = 5;
+                        else if (sqm >= 19.9) bortle = 6;
+                        else if (sqm >= 18.9) bortle = 7;
+                        else if (sqm >= 18.0) bortle = 8;
+                        
+                        document.getElementById('bortleValue').textContent = bortle;
+                        document.getElementById('bortleSource').textContent = `SQM ${sqm.toFixed(1)}`;
+                        
+                        // Position marker on scale (0% = Bortle1, 100% = Bortle9)
+                        const percent = ((bortle - 1) / 8) * 100;
+                        document.getElementById('bortleMarker').style.left = `${percent}%`;
+                        
+                        // Advice
+                        const adviceMap = {
+                            1: 'Ciel excellent : parfait pour les galaxies faibles.',
+                            2: 'Très bon ciel : idéal pour la plupart des objets.',
+                            3: 'Bon ciel rural : nébuleuses et galaxies bien visibles.',
+                            4: 'Ciel périurbain : filtres recommandés.',
+                            5: 'Banlieue : limites sur objets faibles.',
+                            6: 'Banlieue lumineuse : objets brillants seulement.',
+                            7: 'Périphérie ville : planètes et Lune.',
+                            8: 'Ville : forte pollution lumineuse.',
+                            9: 'Centre‑ville : observation très limitée.'
+                        };
+                        document.getElementById('bortleAdvice').textContent = adviceMap[bortle] || 'Donnée non disponible.';
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.log('Bortle API error:', e);
+            }
+            
+            // Fallback: estimate from population density?
+            document.getElementById('bortleValue').textContent = '?';
+            document.getElementById('bortleSource').textContent = 'Indisponible';
+            document.getElementById('bortleAdvice').textContent = 'Qualité du ciel non disponible pour cette position.';
+        }
+
+        // Focal calculation logic
+        let baseFocalLength = 400;
+
+        document.getElementById('telescope').addEventListener('change', function() {
+            if (this.value) {
+                baseFocalLength = parseFloat(this.value);
+                updateEffectiveFocal();
+            }
+        });
+
+        document.getElementById('reducerBarlow').addEventListener('change', updateEffectiveFocal);
+
+        function updateEffectiveFocal() {
+            const factor = parseFloat(document.getElementById('reducerBarlow').value || 1);
+            const effective = Math.round(baseFocalLength * factor);
+            const focalEl = document.getElementById('mainFocalLength');
+            if (focalEl) focalEl.value = effective;
+
+            const baseEl = document.getElementById('baseFocalDisplay');
+            const factEl = document.getElementById('factorDisplay');
+            if (baseEl) baseEl.textContent = String(Math.round(baseFocalLength));
+            if (factEl) factEl.textContent = `${factor.toFixed(2)}x`;
+
+            // Met à jour aussi le calcul APN (règle trépied) si présent
+            if (typeof updateTripodRule === 'function') updateTripodRule();
+        }
+
+        // Guide scope focal length auto-fill
+        document.getElementById('guideScope').addEventListener('change', function() {
+            const val = this.value;
+            if (val === 'oag') {
+                // OAG uses main scope focal length
+                const mainFocal = document.getElementById('mainFocalLength').value || 400;
+                document.getElementById('guideFocalLength').value = mainFocal;
+                const fl = document.getElementById('focalLengthAsiair');
+                if (fl) fl.value = mainFocal;
+            } else if (val && !isNaN(parseFloat(val))) {
+                document.getElementById('guideFocalLength').value = val;
+                const fl = document.getElementById('focalLengthAsiair');
+                if (fl) fl.value = val;
+            }
+            updateCalibrationAssistant();
+        });
+
+        // Guide camera pixel size auto-fill for ASIAIR section
+        document.getElementById('guideCamera').addEventListener('change', function() {
+            const val = this.value;
+            if (val && !isNaN(parseFloat(val))) {
+                const px = document.getElementById('pixelSizeAsiair');
+                if (px) px.value = val;
+            }
+            updateCalibrationAssistant();
+        });
+
+        // Sauvegarde et restauration de la configuration matériel
+        const STORAGE_KEY = 'astrohelper_config';
+
+        function saveConfig() {
+            const config = {
+                mountType: document.getElementById('mountType')?.value || '',
+                telescope: document.getElementById('telescope')?.value || '',
+                reducerBarlow: document.getElementById('reducerBarlow')?.value || '',
+                mainCamera: document.getElementById('mainCamera')?.value || '',
+                guideScope: document.getElementById('guideScope')?.value || '',
+                guideFocalLength: document.getElementById('guideFocalLength')?.value || '',
+                guideCamera: document.getElementById('guideCamera')?.value || '',
+                mainHeater: document.getElementById('mainHeaterToggle')?.checked || false,
+                guideHeater: document.getElementById('guideHeaterToggle')?.checked || false,
+                asiair: document.getElementById('asiair')?.value || '',
+                filterWheel: document.getElementById('filterWheel')?.value || '',
+                filterDrawer: document.getElementById('filterDrawer')?.value || '',
+                eaf: document.getElementById('eaf')?.value || '',
+                battery: document.getElementById('battery')?.value || '',
+                mountPowerSource: document.getElementById('mountPowerSource')?.value || '',
+                guideRate: document.getElementById('guideRate')?.value || 'auto',
+                dslrCamera: document.getElementById('dslrCamera')?.value || '',
+                lensObjective: document.getElementById('lensObjective')?.value || ''
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+        }
+
+        function applyConfigToUI(config) {
+            if (!config) return;
+
+            if (typeof config.mountType !== 'undefined') document.getElementById('mountType').value = config.mountType;
+            if (typeof config.telescope !== 'undefined') {
+                document.getElementById('telescope').value = config.telescope;
+                baseFocalLength = parseFloat(config.telescope) || baseFocalLength;
+            }
+            if (typeof config.reducerBarlow !== 'undefined') document.getElementById('reducerBarlow').value = config.reducerBarlow;
+            if (typeof config.mainCamera !== 'undefined') document.getElementById('mainCamera').value = config.mainCamera;
+            if (typeof config.guideScope !== 'undefined') document.getElementById('guideScope').value = config.guideScope;
+            if (typeof config.guideFocalLength !== 'undefined') document.getElementById('guideFocalLength').value = config.guideFocalLength;
+            if (typeof config.guideCamera !== 'undefined') document.getElementById('guideCamera').value = config.guideCamera;
+            if (typeof config.mainHeater !== 'undefined') document.getElementById('mainHeaterToggle').checked = !!config.mainHeater;
+            if (typeof config.guideHeater !== 'undefined') document.getElementById('guideHeaterToggle').checked = !!config.guideHeater;
+            if (typeof config.asiair !== 'undefined') document.getElementById('asiair').value = config.asiair;
+            if (typeof config.filterWheel !== 'undefined') document.getElementById('filterWheel').value = config.filterWheel;
+            if (typeof config.filterDrawer !== 'undefined') document.getElementById('filterDrawer').value = config.filterDrawer;
+            if (typeof config.eaf !== 'undefined') document.getElementById('eaf').value = config.eaf;
+            if (typeof config.battery !== 'undefined') document.getElementById('battery').value = config.battery;
+            if (typeof config.mountPowerSource !== 'undefined') document.getElementById('mountPowerSource').value = config.mountPowerSource;
+            if (typeof config.guideRate !== 'undefined' && document.getElementById('guideRate')) document.getElementById('guideRate').value = config.guideRate;
+            if (typeof config.dslrCamera !== 'undefined') document.getElementById('dslrCamera').value = config.dslrCamera;
+            if (typeof config.lensObjective !== 'undefined') document.getElementById('lensObjective').value = config.lensObjective;
+
+            // Recalcul après application
+            updateEffectiveFocal();
+            updateTripodRule();
+            updatePowerEstimate();
+            updateCalibrationAssistant();
+        }
+
+        function loadConfig() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (!saved) return false;
+                const config = JSON.parse(saved);
+                applyConfigToUI(config);
+                return true;
+            } catch (e) {
+                console.log('Erreur chargement config:', e);
+                return false;
+            }
+        }
+
+        // Preset "Mon matériel" (stock)
+        // NOTE: ce preset est appliqué uniquement si aucune config n'est déjà sauvegardée.
+        const STOCK_PRESET = {
+            mountType: 'skywatcher-star-adventurer-gti',
+            telescope: '400',
+            reducerBarlow: '0.9',
+            mainCamera: 'zwo-asi183mc-pro',
+            guideScope: '120',
+            guideFocalLength: '120',
+            guideCamera: '3.75',
+            mainHeater: false,
+            guideHeater: false,
+            // Favoris: ton ASIAIR
+            asiair: 'plus',
+            // Accessoires courants sur la monture
+            filterWheel: '',
+            filterDrawer: 'manual-2in',
+            eaf: 'zwo-eaf',
+            // Favoris: ta batterie
+            battery: 'bluetti-eb3a',
+            // Par défaut: monture sur piles AA (donc ne pas compter sur la batterie nomade)
+            mountPowerSource: 'aa',
+            guideRate: '0.9',
+            // APN/objectif (optionnel, setup trépied)
+            dslrCamera: 'nikon-d5600',
+            lensObjective: '11'
+        };
+
+        function applyStockPreset() {
+            applyConfigToUI(STOCK_PRESET);
+            // Force recalcul + save
+            updateEffectiveFocal();
+            updateTripodRule();
+            updatePowerEstimate();
+            updateCalibrationAssistant();
+            saveConfig();
+        }
+
+        function resetConfig() {
+            localStorage.removeItem(STORAGE_KEY);
+            // Reset UI to defaults
+            applyConfigToUI({
+                mountType: '', telescope: '', reducerBarlow: '1.0', mainCamera: '',
+                guideScope: '', guideFocalLength: '120', guideCamera: '',
+                mainHeater: false, guideHeater: false,
+                asiair: '', filterWheel: '', filterDrawer: '', eaf: '',
+                battery: '', mountPowerSource: 'main', dslrCamera: '', lensObjective: ''
+            });
+        }
+
+        function setupPresetUI() {
+            const btn = document.getElementById('applyStockPreset');
+            if (btn) btn.addEventListener('click', applyStockPreset);
+
+            const resetBtn = document.getElementById('resetConfigBtn');
+            if (resetBtn) resetBtn.addEventListener('click', () => {
+                resetConfig();
+                // Sauvegarde l'état "vide" pour éviter de recharger un ancien preset
+                saveConfig();
+            });
+        }
+
+        // Ajouter les événements de sauvegarde sur tous les éléments
+        ['mountType','telescope','reducerBarlow','mainCamera','guideScope','guideFocalLength','guideCamera','asiair','filterWheel','filterDrawer','eaf','battery','mountPowerSource','guideRate','dslrCamera','lensObjective'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', saveConfig);
+        });
+        document.getElementById('mainHeaterToggle')?.addEventListener('change', saveConfig);
+        document.getElementById('guideHeaterToggle')?.addEventListener('change', saveConfig);
+
+        // Guide rate recommandé (pour le calcul Step Size / calibration)
+        // IMPORTANT: l’ASIAIR utilise le guide-rate de la monture (0.1x à 1.0x).
+        // Ici on fournit une valeur "pro" par défaut selon la monture choisie.
+        function getDefaultGuideRateX(mountId) {
+            const id = (mountId || '').toLowerCase();
+            if (id.includes('star-adventurer') || id.includes('az-gti') || id.includes('skyguider') || id.includes('lighttrack')) return 0.9;
+            if (id.includes('am3') || id.includes('am5')) return 0.5;
+            return 0.5;
+        }
+
+        function getSelectedGuideRateX() {
+            const sel = document.getElementById('guideRate');
+            if (!sel) return null;
+            const v = sel.value;
+            if (!v || v === 'auto') return null;
+            const f = parseFloat(v);
+            return Number.isFinite(f) ? f : null;
+        }
+
+        // Assistant calibration (objectif "12 étapes")
+        function computeCalibrationStepMs({ guideScaleArcsecPx, targetTravelPx, targetSteps, guideRateX, decDeg }) {
+            // Approximation robuste :
+            // - la vitesse sidérale = 15"/s
+            // - en impulsion guidage, vitesse ≈ 15"/s * guideRate * cos(Dec)
+            // - déplacement en px = (vitesse("/s) / scale("/px)) * (ms/1000)
+            // => ms ≈ (targetTravelPx/targetSteps) * scale / (15*guideRate*cosDec) * 1000
+            const cosDec = Math.cos((Math.abs(decDeg) * Math.PI) / 180);
+            const rateArcsecPerSec = 15 * guideRateX * Math.max(0.2, cosDec); // borne mini
+            const pxPerStep = Math.max(0.5, targetTravelPx / Math.max(1, targetSteps));
+            const ms = (pxPerStep * guideScaleArcsecPx / rateArcsecPerSec) * 1000;
+            return Math.max(50, Math.min(4000, ms));
+        }
+
+        function updateCalibrationAssistant() {
+            const focal = parseFloat(document.getElementById('guideFocalLength')?.value || 0);
+            const pixel = parseFloat(document.getElementById('guideCamera')?.value || 0);
+            const mountId = document.getElementById('mountType')?.value || '';
+
+            // Workflow simplifié (pro) : 12 steps, 25px, Dec=0°.
+            // Guide-rate : soit sélection utilisateur, soit valeur auto par monture.
+            const guideRateX = getSelectedGuideRateX() ?? getDefaultGuideRateX(mountId);
+            const decDeg = 0;
+            const targetSteps = 12;
+            const targetTravelPx = 25;
+
+            const outStep = document.getElementById('calStepRecommended');
+            const outStepTop = document.getElementById('setCalStep');
+
+            if (!(focal > 0 && pixel > 0)) {
+                if (outStep) outStep.textContent = '--';
+                if (outStepTop) outStepTop.textContent = '--';
+                return;
+            }
+
+            const scale = (pixel / focal) * 206.265; // "/px
+            const ms = computeCalibrationStepMs({ guideScaleArcsecPx: scale, targetTravelPx, targetSteps, guideRateX, decDeg });
+            const v = Math.round(ms);
+            if (outStep) outStep.textContent = v;
+            if (outStepTop) outStepTop.textContent = v;
+        }
+
+        function setupCalibrationAssistantUI() {
+            // UI supprimée volontairement (tu ne veux pas régler/voir ces paramètres).
+            // On garde juste la valeur Step Size (ms) calculée automatiquement.
+        }
+
+        // ========== GRAPHIQUE DE GUIDAGE (SIMULATION + DONNÉES RÉELLES) ==========
+        let guidingAnimationId = null;
+        let guidingDataRA = [];
+        let guidingDataDEC = [];
+        let guidingTime = 0;
+        const MAX_POINTS = 150;
+
+        // Mode: simulation ou replay de données réelles collées par l'utilisateur
+        let guideMode = 'sim'; // 'sim' | 'real'
+        let realDataRA = [];
+        let realDataDEC = [];
+        let realDataIndex = 0;
+
+        function setGuideDataStatus(text, tone = 'muted') {
+            const el = document.getElementById('guideDataStatus');
+            if (!el) return;
+            el.textContent = text;
+            el.className = 'text-[10px] ' + (tone === 'ok' ? 'text-green-400' : tone === 'warn' ? 'text-yellow-400' : tone === 'bad' ? 'text-red-400' : 'text-gray-500');
+        }
+
+        function computeRms(arr) {
+            if (!arr || arr.length === 0) return 0;
+            const mean = arr.reduce((s, v) => s + v, 0) / arr.length;
+            const ms = arr.reduce((s, v) => {
+                const d = v - mean;
+                return s + d * d;
+            }, 0) / arr.length;
+            return Math.sqrt(ms);
+        }
+
+        function std(arr) {
+            if (!arr || arr.length < 2) return 0;
+            const mean = arr.reduce((s, v) => s + v, 0) / arr.length;
+            const v = arr.reduce((s, x) => s + (x - mean) * (x - mean), 0) / (arr.length - 1);
+            return Math.sqrt(v);
+        }
+
+        function diffs(arr) {
+            const out = [];
+            for (let i = 1; i < arr.length; i++) out.push(arr[i] - arr[i - 1]);
+            return out;
+        }
+
+        function signChangeRate(arr) {
+            if (!arr || arr.length < 3) return 0;
+            let changes = 0;
+            for (let i = 2; i < arr.length; i++) {
+                const a = arr[i - 1] - arr[i - 2];
+                const b = arr[i] - arr[i - 1];
+                if (a === 0 || b === 0) continue;
+                if (Math.sign(a) !== Math.sign(b)) changes++;
+            }
+            return changes / (arr.length - 2);
+        }
+
+        function getMountGuideClass(mountId) {
+            const id = (mountId || '').toLowerCase();
+            if (id.includes('am3') || id.includes('am5')) return 'harmonic';
+            if (id.includes('star-adventurer') || id.includes('az-gti') || id.includes('skyguider') || id.includes('lighttrack')) return 'light';
+            return 'worm';
+        }
+
+        function getGuideScaleArcsecPx() {
+            const focal = parseFloat(document.getElementById('guideFocalLength')?.value || 0);
+            const pixel = parseFloat(document.getElementById('guideCamera')?.value || 0);
+            if (!(focal > 0 && pixel > 0)) return 0;
+            return (pixel / focal) * 206.265;
+        }
+
+        function parseGuideData(text) {
+            const lines = (text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const ra = [];
+            const dec = [];
+            const bad = [];
+
+            for (const line of lines) {
+                // Cherche 2 nombres (RA, DEC) dans la ligne
+                const nums = line.match(/[-+]?\d*\.?\d+/g);
+                if (!nums || nums.length < 2) {
+                    bad.push(line);
+                    continue;
+                }
+                const r = parseFloat(nums[0]);
+                const d = parseFloat(nums[1]);
+                if (Number.isFinite(r) && Number.isFinite(d)) {
+                    ra.push(r);
+                    dec.push(d);
+                } else {
+                    bad.push(line);
+                }
+            }
+            return { ra, dec, badCount: bad.length, totalLines: lines.length };
+        }
+
+        function parseGuideColumn(text) {
+            const lines = (text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const arr = [];
+            for (const line of lines) {
+                const nums = line.match(/[-+]?\d*\.?\d+/g);
+                if (!nums || nums.length < 1) continue;
+                const v = parseFloat(nums[0]);
+                if (Number.isFinite(v)) arr.push(v);
+            }
+            return arr;
+        }
+
+        function computeGuidingMetrics(ra, dec) {
+            const rmsRA = computeRms(ra);
+            const rmsDEC = computeRms(dec);
+            const rmsTotal = Math.sqrt(rmsRA * rmsRA + rmsDEC * rmsDEC);
+
+            const dRA = diffs(ra);
+            const dDEC = diffs(dec);
+
+            return {
+                rmsRA, rmsDEC, rmsTotal,
+                stdRA: std(ra), stdDEC: std(dec),
+                stdDiffRA: std(dRA), stdDiffDEC: std(dDEC),
+                signChRA: signChangeRate(ra),
+                signChDEC: signChangeRate(dec),
+                n: Math.min(ra.length, dec.length)
+            };
+        }
+
+        function buildTuningAdvice(metrics) {
+            const mountId = document.getElementById('mountType')?.value || '';
+            const mountClass = getMountGuideClass(mountId);
+            const scale = getGuideScaleArcsecPx();
+
+            // Réglages actuels saisis par l’utilisateur (ASIAIR)
+            const curAggrRA = parseFloat(document.getElementById('curAggrRA')?.value || 60);
+            const curAggrDEC = parseFloat(document.getElementById('curAggrDEC')?.value || 60);
+            const curExp = parseFloat(document.getElementById('curGuideExp')?.value || 2.0);
+            const curMinMove = parseFloat(document.getElementById('curMinMove')?.value || 0.20);
+
+            // Recos "uniques" (pas de plages) — cohérentes avec calculateExpertSettings()
+            const expRec = mountClass === 'harmonic' ? 0.8 : mountClass === 'light' ? 1.8 : 2.5;
+            const minMoveRecArcsec = scale > 0 ? clamp(scale * 0.20, 0.10, 0.60) : 0.25; // ≈0.20px
+
+            // Détection (simple mais robuste) : oscillation vs dérive
+            const oscRA = (metrics.signChRA > 0.50 && metrics.stdDiffRA > metrics.stdRA * 0.85);
+            const oscDEC = (metrics.signChDEC > 0.50 && metrics.stdDiffDEC > metrics.stdDEC * 0.85);
+
+            const driftRA = (!oscRA && metrics.stdDiffRA < metrics.stdRA * 0.55 && metrics.rmsRA > 0.80);
+            const driftDEC = (!oscDEC && metrics.stdDiffDEC < metrics.stdDEC * 0.55 && metrics.rmsDEC > 0.80);
+
+            // Helpers : ASIAIR = pas de 5%
+            const round5 = (x) => Math.round(x / 5) * 5;
+            const clamp5 = (x) => clamp(round5(x), 0, 100);
+
+            // Delta aggr "unique" (pas de fourchette)
+            const deltaOsc = (signCh) => (signCh > 0.65 ? 15 : 10);
+            const deltaDrift = (rms) => (rms > 1.20 ? 15 : 10);
+
+            const tips = [];
+            tips.push(`<div class="text-[10px] text-gray-400">Mesures analysées : <span class="text-gray-200 font-semibold">${metrics.n}</span> points • RMS total : <span class="text-green-300 font-bold">${metrics.rmsTotal.toFixed(2)}\"</span></div>`);
+            tips.push(`<div class="text-[10px] text-gray-400">Références (uniques) : Expo guide conseillée <span class="text-gray-200 font-semibold">${expRec.toFixed(1)}s</span> • Min‑move conseillé <span class="text-gray-200 font-semibold">${minMoveRecArcsec.toFixed(2)}\"</span>.</div>`);
+
+            // Min-move (valeur unique)
+            if (scale > 0) {
+                const mmPx = curMinMove / scale;
+                if (mmPx < 0.12) {
+                    tips.push(`<div class="text-[10px]"><span class="text-yellow-300 font-bold">Min‑move trop bas</span> (≈${mmPx.toFixed(2)} px) → mets <span class="text-cyan-300 font-bold">${minMoveRecArcsec.toFixed(2)}\"</span>.</div>`);
+                } else if (mmPx > 0.35) {
+                    tips.push(`<div class="text-[10px]"><span class="text-yellow-300 font-bold">Min‑move trop haut</span> (≈${mmPx.toFixed(2)} px) → mets <span class="text-cyan-300 font-bold">${minMoveRecArcsec.toFixed(2)}\"</span>.</div>`);
+                } else {
+                    tips.push(`<div class="text-[10px]"><span class="text-green-300 font-bold">Min‑move OK</span> (≈${mmPx.toFixed(2)} px).</div>`);
+                }
+            }
+
+            // Expo guide (valeur unique)
+            if (curExp > 0) {
+                const diff = curExp - expRec;
+                if (Math.abs(diff) >= 0.6) {
+                    tips.push(`<div class="text-[10px]"><span class="text-yellow-300 font-bold">Expo guide à ajuster</span> → mets <span class="text-cyan-300 font-bold">${expRec.toFixed(1)}s</span>.</div>`);
+                } else {
+                    tips.push(`<div class="text-[10px]"><span class="text-green-300 font-bold">Expo guide OK</span>.</div>`);
+                }
+            }
+
+            // Agressivité RA (valeur unique)
+            if (oscRA) {
+                const d = deltaOsc(metrics.signChRA);
+                const newRA = clamp5(curAggrRA - d);
+                tips.push(`<div class="text-[10px]"><span class="text-red-300 font-bold">RA oscille</span> → Aggr. RA : <span class="text-cyan-200 font-bold">${newRA}%</span> (${curAggrRA}% → -${d}%).</div>`);
+            } else if (driftRA) {
+                const d = deltaDrift(metrics.rmsRA);
+                const newRA = clamp5(curAggrRA + d);
+                tips.push(`<div class="text-[10px]"><span class="text-yellow-300 font-bold">RA sous‑corrigé</span> → Aggr. RA : <span class="text-cyan-200 font-bold">${newRA}%</span> (${curAggrRA}% → +${d}%).</div>`);
+            } else {
+                tips.push(`<div class="text-[10px]"><span class="text-green-300 font-bold">RA stable</span> : ne change rien (ou ajuste par pas de 5% max).</div>`);
+            }
+
+            // Agressivité DEC (valeur unique)
+            if (oscDEC) {
+                const d = deltaOsc(metrics.signChDEC);
+                const newDEC = clamp5(curAggrDEC - d);
+                tips.push(`<div class="text-[10px]"><span class="text-red-300 font-bold">DEC oscille</span> → Aggr. DEC : <span class="text-cyan-200 font-bold">${newDEC}%</span> (${curAggrDEC}% → -${d}%).</div>`);
+            } else if (driftDEC) {
+                const d = deltaDrift(metrics.rmsDEC);
+                const newDEC = clamp5(curAggrDEC + d);
+                tips.push(`<div class="text-[10px]"><span class="text-yellow-300 font-bold">DEC dérive</span> → Aggr. DEC : <span class="text-cyan-200 font-bold">${newDEC}%</span> (${curAggrDEC}% → +${d}%). (Vérifie aussi l’alignement polaire.)</div>`);
+            } else {
+                tips.push(`<div class="text-[10px]"><span class="text-green-300 font-bold">DEC correct</span>.</div>`);
+            }
+
+            tips.push(`<div class="text-[10px] text-gray-400">Ordre pro : (1) polar align → (2) min‑move (${minMoveRecArcsec.toFixed(2)}\") → (3) expo (${expRec.toFixed(1)}s) → (4) agressivité (pas de 5%).</div>`);
+
+            return tips.join('');
+        }
+
+        function renderTuningAdvice(metrics) {
+            const el = document.getElementById('tuningAdvice');
+            if (!el) return;
+            el.innerHTML = buildTuningAdvice(metrics);
+        }
+
+        function drawGuidingChart(ctx, canvas) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Grille
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 10; i++) {
+                const y = (canvas.height / 10) * i;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+
+            // Axe zéro
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height / 2);
+            ctx.lineTo(canvas.width, canvas.height / 2);
+            ctx.stroke();
+
+            // Échelle verticale auto (arcsec)
+            const maxAbs = Math.max(
+                1,
+                ...guidingDataRA.map(v => Math.abs(v)),
+                ...guidingDataDEC.map(v => Math.abs(v))
+            );
+            const pxPerArcsec = (canvas.height * 0.40) / maxAbs; // 80% de la hauteur
+
+            // Courbe RA
+            ctx.strokeStyle = '#ff4444';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            guidingDataRA.forEach((val, idx) => {
+                const x = (idx / MAX_POINTS) * canvas.width;
+                const y = canvas.height / 2 - (val * pxPerArcsec);
+                if (idx === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            // Courbe DEC
+            ctx.strokeStyle = '#4488ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            guidingDataDEC.forEach((val, idx) => {
+                const x = (idx / MAX_POINTS) * canvas.width;
+                const y = canvas.height / 2 - (val * pxPerArcsec);
+                if (idx === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            const metrics = computeGuidingMetrics(guidingDataRA, guidingDataDEC);
+            document.getElementById('rmsRA').textContent = metrics.rmsRA.toFixed(2) + '"';
+            document.getElementById('rmsDEC').textContent = metrics.rmsDEC.toFixed(2) + '"';
+            document.getElementById('rmsTotal').textContent = metrics.rmsTotal.toFixed(2) + '"';
+
+            // Actualise conseils si on est en mode "real" (ou si l'utilisateur a déjà demandé)
+            if (guideMode === 'real' && metrics.n >= 10) {
+                renderTuningAdvice(metrics);
+            }
+        }
+
+        function resetGuidingBuffers() {
+            guidingDataRA = [];
+            guidingDataDEC = [];
+            guidingTime = 0;
+            realDataIndex = 0;
+        }
+
+        function startGuidingSimulation() {
+            const canvas = document.getElementById('guidingCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+
+            // Stop si déjà en cours
+            stopGuidingSimulation();
+
+            // Paramètres de simulation selon monture
+            const mountId = document.getElementById('mountType')?.value || '';
+            let peAmplitude = 3.0; // arcsec
+            let peFreq = 0.05; // Hz
+
+            if (mountId.includes('am3') || mountId.includes('am5')) {
+                peAmplitude = 2.0;
+                peFreq = 0.15;
+            } else if (mountId.includes('star-adventurer') || mountId.includes('az-gti')) {
+                peAmplitude = 4.0;
+                peFreq = 0.08;
+            }
+
+            function stepOnce() {
+                guidingTime += 0.05;
+
+                let raError = 0;
+                let decError = 0;
+
+                if (guideMode === 'real' && realDataRA.length > 0 && realDataDEC.length > 0) {
+                    raError = realDataRA[realDataIndex % realDataRA.length];
+                    decError = realDataDEC[realDataIndex % realDataDEC.length];
+                    realDataIndex++;
+                } else {
+                    // Simulation (erreur périodique + bruit)
+                    raError = peAmplitude * Math.sin(2 * Math.PI * peFreq * guidingTime) + (Math.random() - 0.5) * 0.8;
+                    decError = 0.5 * Math.sin(2 * Math.PI * 0.02 * guidingTime) + (Math.random() - 0.5) * 0.6;
+                }
+
+                guidingDataRA.push(raError);
+                guidingDataDEC.push(decError);
+
+                if (guidingDataRA.length > MAX_POINTS) {
+                    guidingDataRA.shift();
+                    guidingDataDEC.shift();
+                }
+
+                drawGuidingChart(ctx, canvas);
+                guidingAnimationId = requestAnimationFrame(stepOnce);
+            }
+
+            stepOnce();
+        }
+
+        function stopGuidingSimulation() {
+            if (guidingAnimationId) {
+                cancelAnimationFrame(guidingAnimationId);
+                guidingAnimationId = null;
+            }
+        }
+
+        function setupGuideDataUI() {
+            const inputPairs = document.getElementById('guideDataInput');
+            const inputRA = document.getElementById('guideDataInputRA');
+            const inputDEC = document.getElementById('guideDataInputDEC');
+            const modeSel = document.getElementById('guideInputMode');
+            const wrapPairs = document.getElementById('guideInputPairsWrap');
+            const wrapSep = document.getElementById('guideInputSeparateWrap');
+
+            const applyBtn = document.getElementById('applyGuideDataBtn');
+            const clearBtn = document.getElementById('clearGuideDataBtn');
+            const simBtn = document.getElementById('useSimModeBtn');
+
+            function updateModeUI() {
+                const mode = modeSel?.value || 'pairs';
+                if (mode === 'separate') {
+                    wrapPairs?.classList.add('hidden');
+                    wrapSep?.classList.remove('hidden');
+                } else {
+                    wrapSep?.classList.add('hidden');
+                    wrapPairs?.classList.remove('hidden');
+                }
+            }
+
+            modeSel?.addEventListener('change', updateModeUI);
+            updateModeUI();
+
+            if (applyBtn) {
+                applyBtn.addEventListener('click', () => {
+                    const mode = modeSel?.value || 'pairs';
+
+                    let ra = [];
+                    let dec = [];
+                    let badCount = 0;
+
+                    if (mode === 'separate') {
+                        ra = parseGuideColumn(inputRA?.value || '');
+                        dec = parseGuideColumn(inputDEC?.value || '');
+                        const n = Math.min(ra.length, dec.length);
+                        ra = ra.slice(0, n);
+                        dec = dec.slice(0, n);
+                    } else {
+                        const parsed = parseGuideData(inputPairs?.value || '');
+                        ra = parsed.ra;
+                        dec = parsed.dec;
+                        badCount = parsed.badCount;
+                    }
+
+                    if (ra.length < 10 || dec.length < 10) {
+                        setGuideDataStatus('Données insuffisantes (≥10 lignes)', 'warn');
+                        const el = document.getElementById('tuningAdvice');
+                        if (el) el.innerHTML = 'Ajoute davantage de lignes (au moins 10) puis relance.';
+                        return;
+                    }
+
+                    guideMode = 'real';
+                    realDataRA = ra;
+                    realDataDEC = dec;
+                    resetGuidingBuffers();
+                    setGuideDataStatus(`Mode: données réelles (${ra.length} pts${badCount ? `, ${badCount} ignorées` : ''})`, 'ok');
+
+                    // Analyse immédiate (sur les données complètes)
+                    renderTuningAdvice(computeGuidingMetrics(realDataRA, realDataDEC));
+
+                    // Lance le replay (courbes qui bougent)
+                    startGuidingSimulation();
+                });
+            }
+
+            if (clearBtn) {
+                clearBtn.addEventListener('click', () => {
+                    if (inputPairs) inputPairs.value = '';
+                    if (inputRA) inputRA.value = '';
+                    if (inputDEC) inputDEC.value = '';
+                    const el = document.getElementById('tuningAdvice');
+                    if (el) el.innerHTML = 'Colle des données RA/DEC puis clique « Tracer & analyser ».';
+                    setGuideDataStatus('Mode: simulation', 'muted');
+                });
+            }
+
+            if (simBtn) {
+                simBtn.addEventListener('click', () => {
+                    guideMode = 'sim';
+                    realDataRA = [];
+                    realDataDEC = [];
+                    resetGuidingBuffers();
+                    setGuideDataStatus('Mode: simulation', 'muted');
+                    startGuidingSimulation();
+                });
+            }
+
+            setGuideDataStatus('Mode: simulation', 'muted');
+        }
+
+        window.addEventListener('load', async () => {
+            // Demander le GPS au démarrage
+            setGpsStatusHeader('<i class="fas fa-spinner fa-spin mr-1"></i>Localisation...');
+            const located = await getLocation();
+            if (located) {
+                setGpsStatusHeader(`<i class="fas fa-check-circle text-green-500 mr-1"></i>${currentPlace}`);
+            } else {
+                setGpsStatusHeader(`<i class="fas fa-exclamation-triangle text-yellow-500 mr-1"></i>GPS indisponible`);
+            }
+            
+            // UI presets (Mon matériel / Reset)
+            setupPresetUI();
+
+            // Charger la configuration sauvegardée (ou appliquer le preset stock si première ouverture)
+            const hasSaved = loadConfig();
+            if (!hasSaved) {
+                applyStockPreset();
+            }
+
+            // Step size (ms) : calcul automatique, sans UI
+            setupCalibrationAssistantUI();
+            updateCalibrationAssistant();
+
+            // Charger toutes les données (météo, nuit astro, etc.)
+            await loadAllData();
+            
+            // Affiche une première estimation
+            updatePowerEstimate();
+            
+            // Calcule et affiche immédiatement les réglages ASIAIR (si config chargée)
+            setTimeout(calculateExpertSettings, 500);
+        });
+    </script>
+</body>
+</html>
